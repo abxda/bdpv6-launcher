@@ -87,6 +87,22 @@ const STR = {
         'consoles.filter.error':  'Solo errores',
         'consoles.filter.warn':   'Warn+errores',
         'consoles.search':        'Filtrar líneas…',
+        'ports.col.service':      'Servicio',
+        'ports.col.desired':      'Puerto',
+        'ports.col.status':       'Estado',
+        'ports.col.owner':        'Ocupado por',
+        'ports.col.actions':      'Acciones',
+        'ports.state.free':       'Libre',
+        'ports.state.ours':       'Nuestro',
+        'ports.state.other':      'Ocupado',
+        'ports.refresh':          'Refrescar',
+        'ports.suggest':          'Sugerir libre',
+        'ports.edit':             'Cambiar puerto',
+        'ports.editPrompt':       'Nuevo puerto para {0} (1024-65534):',
+        'ports.editApplied':      'Puerto guardado. Reinicia el servicio para aplicar.',
+        'ports.suggestApplied':   'Sugerido: {0}. Guardado como override.',
+        'ports.noFree':           'No se encontró puerto libre cercano.',
+        'ports.help':             'Las filas en rojo están ocupadas por otro proceso. Usa "Sugerir libre" para encontrar un puerto alternativo o cierra el proceso conflictivo.',
         'placeholder.upcoming':   'Esta vista se entrega en una fase posterior del plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -141,6 +157,22 @@ const STR = {
         'consoles.filter.error':  'Errors only',
         'consoles.filter.warn':   'Warn + errors',
         'consoles.search':        'Filter lines…',
+        'ports.col.service':      'Service',
+        'ports.col.desired':      'Port',
+        'ports.col.status':       'Status',
+        'ports.col.owner':        'Owned by',
+        'ports.col.actions':      'Actions',
+        'ports.state.free':       'Free',
+        'ports.state.ours':       'Ours',
+        'ports.state.other':      'In use',
+        'ports.refresh':          'Refresh',
+        'ports.suggest':          'Suggest free',
+        'ports.edit':             'Change port',
+        'ports.editPrompt':       'New port for {0} (1024-65534):',
+        'ports.editApplied':      'Port saved. Restart the service to apply.',
+        'ports.suggestApplied':   'Suggested: {0}. Saved as override.',
+        'ports.noFree':           'No free port found nearby.',
+        'ports.help':             'Rows in red are bound by another process. Use "Suggest free" to find an alternative, or close the conflicting process.',
         'placeholder.upcoming':   'This view will be delivered in a later phase of the plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -166,7 +198,7 @@ const STATE = {
 const VIEWS = [
     { id: 'dashboard', icon: 'layout',   render: renderDashboard, onLeave: null },
     { id: 'services',  icon: 'server',   render: renderServices,  onLeave: null },
-    { id: 'ports',     icon: 'plug',     render: renderUpcoming,  onLeave: null },
+    { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh },
     { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null },
     { id: 'hdfs',      icon: 'folder',   render: renderUpcoming,  onLeave: null },
     { id: 'repair',    icon: 'wrench',   render: renderUpcoming,  onLeave: null },
@@ -381,6 +413,87 @@ async function stopService(id) {
 }
 async function startAll() { for (const s of STATE.services) await startService(s.id); }
 async function stopAll()  { for (const s of [...STATE.services].reverse()) await stopService(s.id); }
+
+/* ---------- Ports tab ----------------------------------------------------- */
+let portsRefreshTimer = null;
+
+function stopPortsRefresh() {
+    if (portsRefreshTimer) { clearInterval(portsRefreshTimer); portsRefreshTimer = null; }
+}
+
+async function renderPorts(root) {
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actPortsRefresh">' + iconHTML('refresh') + ' ' + t('ports.refresh') + '</button>';
+    document.getElementById('actPortsRefresh').addEventListener('click', () => paintPorts(root));
+
+    await paintPorts(root);
+
+    // Auto-refresh while this view is active.
+    stopPortsRefresh();
+    portsRefreshTimer = setInterval(() => { if (currentView === 'ports') paintPorts(root); }, 5000);
+}
+
+async function paintPorts(root) {
+    let probes = [];
+    try { probes = await window.go.main.App.ScanPorts() || []; } catch (e) { probes = []; }
+
+    const help = '<div class="c-alert c-alert--info">' + iconHTML('info') + '<div>' + t('ports.help') + '</div></div>';
+
+    const rows = probes.map(p => {
+        const rowClass = p.status === 'other' ? 'c-table__row--danger' : (p.status === 'ours' ? '' : '');
+        const badge =
+            p.status === 'free'  ? '<span class="c-badge c-badge--muted">' + t('ports.state.free')  + '</span>' :
+            p.status === 'ours'  ? '<span class="c-badge c-badge--ok">'    + t('ports.state.ours')  + '</span>' :
+                                   '<span class="c-badge c-badge--danger">' + t('ports.state.other') + '</span>';
+        const owner = (p.status === 'other' && p.owner) ?
+            esc(p.owner.name || '?') + ' <code>PID ' + (p.owner.pid || '?') + '</code>' :
+            '';
+        const actions =
+            '<button class="c-btn" data-act="suggest" data-id="' + p.serviceId + '" data-from="' + p.port + '">' + iconHTML('refresh') + ' ' + t('ports.suggest') + '</button>' +
+            '<button class="c-btn" data-act="edit"    data-id="' + p.serviceId + '" data-name="' + esc(p.serviceName) + '">' + iconHTML('settings') + ' ' + t('ports.edit') + '</button>';
+        return '<tr class="' + rowClass + '">' +
+            '<td><strong>' + esc(p.serviceName) + '</strong><br/><small style="color:var(--color-text-muted);">' + esc(p.serviceId) + '</small></td>' +
+            '<td><code>' + p.port + '</code></td>' +
+            '<td>' + badge + '</td>' +
+            '<td>' + owner + '</td>' +
+            '<td class="c-table__actions">' + actions + '</td>' +
+        '</tr>';
+    }).join('');
+
+    root.innerHTML = help +
+        '<table class="c-table"><thead><tr>' +
+            '<th>' + t('ports.col.service') + '</th>' +
+            '<th>' + t('ports.col.desired') + '</th>' +
+            '<th>' + t('ports.col.status')  + '</th>' +
+            '<th>' + t('ports.col.owner')   + '</th>' +
+            '<th>' + t('ports.col.actions') + '</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+    root.querySelectorAll('button[data-act]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const act = btn.dataset.act, id = btn.dataset.id;
+            if (act === 'suggest') {
+                const from = parseInt(btn.dataset.from, 10) + 1;
+                const next = await window.go.main.App.SuggestFreePort(from);
+                if (!next) { alert(t('ports.noFree')); return; }
+                await window.go.main.App.SetPortOverride(id, next);
+                alert(t('ports.suggestApplied', next));
+                paintPorts(root);
+            } else if (act === 'edit') {
+                const name = btn.dataset.name;
+                const v = prompt(t('ports.editPrompt', name));
+                if (!v) return;
+                const n = parseInt(v, 10);
+                if (!n || n < 1024 || n > 65534) return;
+                try {
+                    await window.go.main.App.SetPortOverride(id, n);
+                    alert(t('ports.editApplied'));
+                    paintPorts(root);
+                } catch (e) { alert('Error: ' + e); }
+            }
+        });
+    });
+}
 
 /* ---------- Consoles tab -------------------------------------------------- */
 let consoleAutoscroll = true;

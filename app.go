@@ -11,6 +11,7 @@ import (
 
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
+	"github.com/abxda/bdpv6-launcher/internal/ports"
 	"github.com/abxda/bdpv6-launcher/internal/services"
 	"github.com/abxda/bdpv6-launcher/internal/state"
 )
@@ -251,4 +252,67 @@ func (a *App) OpenJupyter() {
 		return
 	}
 	wailsruntime.BrowserOpenURL(a.ctx, url)
+}
+
+// --- ports & collisions -----------------------------------------------------
+
+// ScanPorts returns one row per known service port plus an "extras" set of
+// non-service ports often relevant for diagnostics (e.g. HDFS RPC 9000,
+// Kafka controller 9093). Used by the Ports tab.
+func (a *App) ScanPorts() []ports.Probe {
+	probes := []ports.Probe{}
+	for _, svc := range a.registry.All() {
+		probes = append(probes, ports.Probe{
+			ServiceID:   svc.ID(),
+			ServiceName: svc.Name(),
+			Port:        svc.Port(),
+		})
+	}
+	// Extra well-known ports the student often needs to know about even if
+	// the service does not expose a top-level Port() for them.
+	extras := []ports.Probe{
+		{ServiceID: "hdfs_rpc",  ServiceName: "HDFS RPC",         Port: 9000},
+		{ServiceID: "kafka_ctl", ServiceName: "Kafka Controller", Port: 9093},
+	}
+	probes = append(probes, extras...)
+
+	// Build the "PIDs we own" set so the scanner can flag a listening port
+	// as "ours" vs "someone else's".
+	ours := map[int]bool{}
+	for _, svc := range a.registry.All() {
+		if pid := svc.Status().PID; pid > 0 {
+			ours[pid] = true
+		}
+	}
+	return ports.Scan(probes, ours)
+}
+
+// SuggestFreePort returns the first free TCP port at-or-above the requested
+// value. 0 means "could not find one in a sensible search window".
+func (a *App) SuggestFreePort(start int) int {
+	return ports.SuggestFree(start)
+}
+
+// SetPortOverride persists a custom port for a service. The new port takes
+// effect on the next launcher restart (or service Stop+Start once F8 wires
+// in the live reconfiguration path).
+func (a *App) SetPortOverride(serviceID string, port int) error {
+	if port <= 0 || port >= 65535 {
+		return fmt.Errorf("puerto fuera de rango (1-65534): %d", port)
+	}
+	return a.state.Update(func(s *state.State) {
+		if s.PortOverrides == nil {
+			s.PortOverrides = map[string]int{}
+		}
+		s.PortOverrides[serviceID] = port
+	})
+}
+
+// ClearPortOverride drops a custom port (back to the service default).
+func (a *App) ClearPortOverride(serviceID string) error {
+	return a.state.Update(func(s *state.State) {
+		if s.PortOverrides != nil {
+			delete(s.PortOverrides, serviceID)
+		}
+	})
 }

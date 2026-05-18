@@ -340,3 +340,7 @@ body {
 .c-log__text { color: #cbd5e1; }
 .c-log--warn  .c-log__text { color: #fcd34d; }
 .c-log--error .c-log__text { color: #fca5a5; }
+
+/* Danger row highlight (used by the Ports tab to flag conflicting ports) */
+.c-table__row--danger td { background-color: var(--color-danger-bg); }
+.c-table__row--danger:hover td { background-color: #fecaca; }
