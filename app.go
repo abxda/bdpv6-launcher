@@ -20,6 +20,7 @@ import (
 	"github.com/abxda/bdpv6-launcher/internal/services"
 	"github.com/abxda/bdpv6-launcher/internal/setup"
 	"github.com/abxda/bdpv6-launcher/internal/state"
+	"github.com/abxda/bdpv6-launcher/internal/sysinfo"
 )
 
 // App is the Wails-bound type. Methods exported (capitalised) become callable
@@ -67,7 +68,10 @@ func (a *App) startup(ctx context.Context) {
 	_ = a.state.Load()
 	a.bootstrapServices()
 	a.attachLogStreams()
+	a.applyAlwaysOnTop(a.state.Get().AlwaysOnTop)
+	sysinfo.Warm()
 	go a.statusTickLoop()
+	go a.sysinfoTickLoop()
 }
 
 func (a *App) domReady(ctx context.Context) {}
@@ -174,6 +178,28 @@ func (a *App) statusTickLoop() {
 	}
 }
 
+// sysinfoTickLoop samples CPU/RAM and pushes "sysinfo:update" events the
+// dashboard renders as progress bars. 2 s cadence matches the legacy
+// PyQt5 launcher.
+func (a *App) sysinfoTickLoop() {
+	sysinfo.Tick(a.ctx, 2*time.Second, func(s sysinfo.Sample) {
+		wailsruntime.EventsEmit(a.ctx, "sysinfo:update", s)
+	})
+}
+
+// applyAlwaysOnTop pins / unpins the Wails window. Safe to call before
+// the window is fully realised — the runtime no-ops in that case.
+func (a *App) applyAlwaysOnTop(v bool) {
+	if a.ctx == nil {
+		return
+	}
+	if v {
+		wailsruntime.WindowSetAlwaysOnTop(a.ctx, true)
+	} else {
+		wailsruntime.WindowSetAlwaysOnTop(a.ctx, false)
+	}
+}
+
 // ============================================================================
 // Bound methods (callable from JS)
 // ============================================================================
@@ -215,8 +241,32 @@ func (a *App) SetLanguage(lang string) error {
 }
 
 func (a *App) SetAlwaysOnTop(v bool) error {
-	return a.state.Update(func(s *state.State) { s.AlwaysOnTop = v })
+	if err := a.state.Update(func(s *state.State) { s.AlwaysOnTop = v }); err != nil {
+		return err
+	}
+	a.applyAlwaysOnTop(v)
+	return nil
 }
+
+// SetAutoStartJupyter persists the toggle. Honoured by F9 startup behaviour.
+func (a *App) SetAutoStartJupyter(v bool) error {
+	return a.state.Update(func(s *state.State) { s.AutoStartJupyter = v })
+}
+
+// SetJVMHeap stores a JVM heap override (e.g. "1g", "2g") for a service.
+// The new value takes effect on the next service restart.
+func (a *App) SetJVMHeap(serviceID, heap string) error {
+	return a.state.Update(func(s *state.State) {
+		if s.JVMHeap == nil {
+			s.JVMHeap = map[string]string{}
+		}
+		s.JVMHeap[serviceID] = heap
+	})
+}
+
+// GetSysInfo returns one synchronous sample — useful for the initial
+// dashboard render before the first tick event arrives.
+func (a *App) GetSysInfo() sysinfo.Sample { return sysinfo.Now() }
 
 // --- service control --------------------------------------------------------
 

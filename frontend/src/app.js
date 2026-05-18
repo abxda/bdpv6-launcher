@@ -136,6 +136,19 @@ const STR = {
         'notebooks.col.name':     'Archivo',
         'notebooks.col.size':     'Tamaño',
         'notebooks.col.mod':      'Modificación',
+        'dashboard.sys':          'Recursos del sistema',
+        'dashboard.cpu':          'CPU',
+        'dashboard.ram':          'RAM',
+        'settings.section.ui':       'Interfaz',
+        'settings.section.services': 'Servicios',
+        'settings.section.advanced': 'Avanzado',
+        'settings.language':         'Idioma',
+        'settings.alwaysOnTop':      'Mantener ventana siempre al frente',
+        'settings.autoJupyter':      'Iniciar Jupyter automáticamente al arrancar TODO',
+        'settings.heap':             'Heap JVM por servicio (Xms = Xmx)',
+        'settings.heapHelp':         'Valores como 1g, 2g, 512m. Aplican al próximo reinicio del servicio.',
+        'settings.resetPorts':       'Restablecer todos los puertos a sus valores por defecto',
+        'settings.savedToast':       'Guardado.',
         'placeholder.upcoming':   'Esta vista se entrega en una fase posterior del plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -239,6 +252,19 @@ const STR = {
         'notebooks.col.name':     'File',
         'notebooks.col.size':     'Size',
         'notebooks.col.mod':      'Modified',
+        'dashboard.sys':          'System resources',
+        'dashboard.cpu':          'CPU',
+        'dashboard.ram':          'RAM',
+        'settings.section.ui':       'Interface',
+        'settings.section.services': 'Services',
+        'settings.section.advanced': 'Advanced',
+        'settings.language':         'Language',
+        'settings.alwaysOnTop':      'Keep window always on top',
+        'settings.autoJupyter':      'Auto-start Jupyter when Start ALL is used',
+        'settings.heap':             'JVM heap per service (Xms = Xmx)',
+        'settings.heapHelp':         'Values like 1g, 2g, 512m. Apply on next service restart.',
+        'settings.resetPorts':       'Reset all ports to defaults',
+        'settings.savedToast':       'Saved.',
         'placeholder.upcoming':   'This view will be delivered in a later phase of the plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -258,6 +284,8 @@ const STATE = {
     statuses: {},            // id → Status
     logs: {},                // id → [Line]
     activeConsole: null,     // id of the currently viewed service in Consoles tab
+    sysinfo: null,           // latest sysinfo Sample
+    settings: null,          // cached state.State
 };
 
 /* ---------- View registry ------------------------------------------------- */
@@ -269,7 +297,7 @@ const VIEWS = [
     { id: 'hdfs',      icon: 'folder',   render: renderHDFS,      onLeave: null },
     { id: 'repair',    icon: 'wrench',   render: renderRepair,    onLeave: null },
     { id: 'notebooks', icon: 'book',     render: renderNotebooks, onLeave: null },
-    { id: 'settings',  icon: 'settings', render: renderUpcoming,  onLeave: null },
+    { id: 'settings',  icon: 'settings', render: renderSettings,  onLeave: null },
     // Hidden — reachable from the dashboard alert when setup is needed.
     { id: 'wizard',    icon: 'wrench',   render: renderWizard,    onLeave: null, hidden: true },
 ];
@@ -289,6 +317,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const arr = await window.go.main.App.GetStatuses();
         for (const st of (arr || [])) STATE.statuses[st.id] = st;
     } catch (e) {}
+    try { STATE.sysinfo = await window.go.main.App.GetSysInfo(); } catch (e) {}
+    try { STATE.settings = await window.go.main.App.GetState(); } catch (e) {}
 
     subscribeRuntimeEvents();
     renderBrand();
@@ -304,6 +334,11 @@ function subscribeRuntimeEvents() {
         for (const st of (arr || [])) STATE.statuses[st.id] = st;
         if (currentView === 'services')  renderView('services');
         else if (currentView === 'dashboard') renderDashboard(document.getElementById('content'));
+    });
+
+    window.runtime.EventsOn('sysinfo:update', (sample) => {
+        STATE.sysinfo = sample;
+        if (currentView === 'dashboard') updateSysinfoWidgets();
     });
 
     // One subscription per service for live log streaming.
@@ -429,6 +464,43 @@ function renderDashboard(root) {
 
     const wizBtn = document.getElementById('actStartWizard');
     if (wizBtn) wizBtn.addEventListener('click', () => renderView('wizard'));
+
+    // Replace the env-info card with one that also includes the sys widgets
+    // so they live in the same scroll region without a layout shift.
+    const main = root.querySelector('.c-card-grid');
+    if (main) {
+        const sysCard = document.createElement('div');
+        sysCard.className = 'c-card';
+        sysCard.style.gridColumn = '1 / -1';
+        sysCard.innerHTML =
+            '<div class="c-card__title">' + t('dashboard.sys') + '</div>' +
+            '<div class="c-card__body">' +
+                '<div class="c-progress-row"><span class="c-progress-row__label">' + t('dashboard.cpu') + '</span>' +
+                    '<div class="c-progress"><div class="c-progress__bar" id="cpuBar" style="width:0%"></div></div>' +
+                    '<span class="c-progress-row__val" id="cpuVal">0%</span></div>' +
+                '<div class="c-progress-row"><span class="c-progress-row__label">' + t('dashboard.ram') + '</span>' +
+                    '<div class="c-progress"><div class="c-progress__bar" id="ramBar" style="width:0%"></div></div>' +
+                    '<span class="c-progress-row__val" id="ramVal">0%</span></div>' +
+            '</div>';
+        main.insertBefore(sysCard, main.firstChild);
+        updateSysinfoWidgets();
+    }
+}
+
+function updateSysinfoWidgets() {
+    if (!STATE.sysinfo) return;
+    const cpuBar = document.getElementById('cpuBar');
+    const ramBar = document.getElementById('ramBar');
+    const cpuVal = document.getElementById('cpuVal');
+    const ramVal = document.getElementById('ramVal');
+    if (cpuBar && cpuVal) {
+        cpuBar.style.width = STATE.sysinfo.cpuPercent + '%';
+        cpuVal.textContent = STATE.sysinfo.cpuPercent + '%';
+    }
+    if (ramBar && ramVal) {
+        ramBar.style.width = STATE.sysinfo.ramPercent + '%';
+        ramVal.textContent = STATE.sysinfo.ramPercent + '% (' + STATE.sysinfo.ramUsedMB + ' / ' + STATE.sysinfo.ramTotalMB + ' MB)';
+    }
 }
 
 /* ---------- Wizard (hidden view, reached from Dashboard) ------------------ */
@@ -520,6 +592,70 @@ async function wizardRunAll() {
     try { await window.go.main.App.RunSetupAll(); }
     catch (e) { /* surfaced per-step */ }
     paintWizard(document.getElementById('content'));
+}
+
+/* ---------- Settings tab -------------------------------------------------- */
+async function renderSettings(root) {
+    document.getElementById('viewActions').innerHTML = '';
+    if (!STATE.settings) {
+        try { STATE.settings = await window.go.main.App.GetState(); } catch (e) { STATE.settings = {}; }
+    }
+    const s = STATE.settings || {};
+    const heap = s.jvmHeap || {};
+
+    const heapInputs = ['elasticsearch', 'kafka', 'hadoop'].map(id =>
+        '<div style="margin: 6px 0;"><label style="display:flex; align-items:center; gap:8px;">' +
+            '<span style="width:130px; color:var(--color-text-muted);">' + id + '</span>' +
+            '<input type="text" class="c-input" data-heap="' + id + '" value="' + esc(heap[id] || '') + '" placeholder="ej. 1g"/>' +
+        '</label></div>'
+    ).join('');
+
+    root.innerHTML =
+        '<div class="c-card-grid">' +
+            '<div class="c-card"><div class="c-card__title">' + t('settings.section.ui') + '</div>' +
+                '<div class="c-card__body">' +
+                    '<div style="margin-bottom:12px;"><label><strong>' + t('settings.language') + '</strong></label><br/>' +
+                        '<label class="c-checkbox"><input type="radio" name="lang" value="es" ' + (s.language === 'es' ? 'checked' : '') + '/> Español</label>&nbsp;&nbsp;' +
+                        '<label class="c-checkbox"><input type="radio" name="lang" value="en" ' + (s.language === 'en' ? 'checked' : '') + '/> English</label>' +
+                    '</div>' +
+                    '<div style="margin-bottom:8px;"><label class="c-checkbox"><input type="checkbox" id="settAlwaysOnTop" ' + (s.alwaysOnTop ? 'checked' : '') + '/> ' + t('settings.alwaysOnTop') + '</label></div>' +
+                    '<div><label class="c-checkbox"><input type="checkbox" id="settAutoJupyter" ' + (s.autoStartJupyter ? 'checked' : '') + '/> ' + t('settings.autoJupyter') + '</label></div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="c-card"><div class="c-card__title">' + t('settings.section.services') + '</div>' +
+                '<div class="c-card__body">' +
+                    '<strong>' + t('settings.heap') + '</strong>' +
+                    '<small style="color:var(--color-text-muted); display:block; margin: 4px 0 8px;">' + t('settings.heapHelp') + '</small>' +
+                    heapInputs +
+                '</div>' +
+            '</div>' +
+            '<div class="c-card" style="grid-column:1 / -1;"><div class="c-card__title">' + t('settings.section.advanced') + '</div>' +
+                '<div class="c-card__body">' +
+                    '<button class="c-btn c-btn--danger" id="actResetPorts">' + iconHTML('trash') + ' ' + t('settings.resetPorts') + '</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    root.querySelectorAll('input[name="lang"]').forEach(el => el.addEventListener('change', async e => {
+        try { await window.go.main.App.SetLanguage(e.target.value); LANG = e.target.value; renderBrand(); renderNav(); renderView(currentView); } catch (e2) { alert(e2); }
+    }));
+    document.getElementById('settAlwaysOnTop').addEventListener('change', async e => {
+        try { await window.go.main.App.SetAlwaysOnTop(e.target.checked); } catch (e2) { alert(e2); }
+    });
+    document.getElementById('settAutoJupyter').addEventListener('change', async e => {
+        try { await window.go.main.App.SetAutoStartJupyter(e.target.checked); } catch (e2) { alert(e2); }
+    });
+    root.querySelectorAll('input[data-heap]').forEach(el => el.addEventListener('change', async e => {
+        try { await window.go.main.App.SetJVMHeap(e.target.dataset.heap, e.target.value); } catch (e2) { alert(e2); }
+    }));
+    document.getElementById('actResetPorts').addEventListener('click', async () => {
+        if (!confirm(t('settings.resetPorts') + '?')) return;
+        try {
+            const ids = (STATE.services || []).map(s => s.id);
+            for (const id of ids) await window.go.main.App.ClearPortOverride(id);
+            alert(t('settings.savedToast'));
+        } catch (e) { alert(e); }
+    });
 }
 
 /* ---------- HDFS tab ------------------------------------------------------ */

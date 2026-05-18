@@ -370,3 +370,26 @@ body {
 .c-hdfs-file { padding: 4px 6px; color: var(--color-text-muted); }
 .c-hdfs-file svg { width: 14px; height: 14px; vertical-align: middle; }
 .c-hdfs-empty { padding: 4px 6px; color: var(--color-text-muted); font-style: italic; }
+
+/* Progress bars (CPU / RAM widgets on the dashboard) */
+.c-progress-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 220px;
+    align-items: center;
+    gap: var(--s-3);
+    margin: var(--s-2) 0;
+    font-size: var(--fs-sm);
+}
+.c-progress-row__label { color: var(--color-text-muted); font-weight: 600; }
+.c-progress-row__val   { color: var(--color-text-muted); font-family: var(--font-mono); text-align: right; font-size: var(--fs-xs); }
+.c-progress {
+    height: 10px;
+    background-color: var(--color-surface-2);
+    border-radius: 5px;
+    overflow: hidden;
+}
+.c-progress__bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-success), var(--color-info));
+    transition: width 300ms ease;
+}
