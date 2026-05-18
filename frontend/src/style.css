@@ -347,3 +347,26 @@ body {
 
 /* Danger-outlined card (Repair tab) */
 .c-card--danger-outline { border-color: var(--color-danger); border-left-width: 3px; }
+
+/* HDFS tree */
+.c-hdfs-tree {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--s-3);
+    font-size: var(--fs-sm);
+}
+.c-hdfs-node { margin: 2px 0; }
+.c-hdfs-node__row {
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    user-select: none;
+}
+.c-hdfs-node__row:hover { background-color: var(--color-surface-2); }
+.c-hdfs-node__row svg { width: 16px; height: 16px; vertical-align: middle; }
+.c-hdfs-node__chev { display: inline-block; width: 12px; color: var(--color-text-muted); }
+.c-hdfs-node__children { padding-left: var(--s-5); }
+.c-hdfs-file { padding: 4px 6px; color: var(--color-text-muted); }
+.c-hdfs-file svg { width: 14px; height: 14px; vertical-align: middle; }
+.c-hdfs-empty { padding: 4px 6px; color: var(--color-text-muted); font-style: italic; }

@@ -126,6 +126,16 @@ const STR = {
         'repair.hdfs.desc':       'Re-ejecuta hdfs namenode -format. Pierdes todos los archivos en HDFS pero conservas Jupyter, Elasticsearch y Kafka. Útil si HDFS no arranca por estado sucio.',
         'repair.kafka.title':     'Reformatear Kafka',
         'repair.kafka.desc':      'Genera un nuevo cluster id y reformatea el log de KRaft. Pierdes todos los topics. Útil si Kafka no arranca por estado inconsistente.',
+        'hdfs.root':              '/ (raíz HDFS)',
+        'hdfs.refresh':           'Refrescar',
+        'hdfs.error':             'No se pudo conectar al NameNode. ¿HDFS está iniciado?',
+        'hdfs.empty':             '(directorio vacío)',
+        'notebooks.empty':        'No hay notebooks en la carpeta. Coloca archivos .ipynb dentro de notebooks/.',
+        'notebooks.open':         'Abrir',
+        'notebooks.needsJupyter': 'Jupyter no está corriendo. Inícialo desde la pestaña Servicios.',
+        'notebooks.col.name':     'Archivo',
+        'notebooks.col.size':     'Tamaño',
+        'notebooks.col.mod':      'Modificación',
         'placeholder.upcoming':   'Esta vista se entrega en una fase posterior del plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -219,6 +229,16 @@ const STR = {
         'repair.hdfs.desc':       'Re-runs hdfs namenode -format. You lose every file in HDFS but Jupyter, Elasticsearch and Kafka are preserved. Useful when HDFS will not start due to dirty state.',
         'repair.kafka.title':     'Reformat Kafka',
         'repair.kafka.desc':      'Generates a new cluster id and reformats the KRaft log. You lose every topic. Useful when Kafka will not start due to inconsistent state.',
+        'hdfs.root':              '/ (HDFS root)',
+        'hdfs.refresh':           'Refresh',
+        'hdfs.error':             'Could not reach NameNode. Is HDFS running?',
+        'hdfs.empty':             '(empty directory)',
+        'notebooks.empty':        'No notebooks in the folder. Drop .ipynb files inside notebooks/.',
+        'notebooks.open':         'Open',
+        'notebooks.needsJupyter': 'Jupyter is not running. Start it from the Services tab.',
+        'notebooks.col.name':     'File',
+        'notebooks.col.size':     'Size',
+        'notebooks.col.mod':      'Modified',
         'placeholder.upcoming':   'This view will be delivered in a later phase of the plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -246,9 +266,9 @@ const VIEWS = [
     { id: 'services',  icon: 'server',   render: renderServices,  onLeave: null },
     { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh },
     { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null },
-    { id: 'hdfs',      icon: 'folder',   render: renderUpcoming,  onLeave: null },
+    { id: 'hdfs',      icon: 'folder',   render: renderHDFS,      onLeave: null },
     { id: 'repair',    icon: 'wrench',   render: renderRepair,    onLeave: null },
-    { id: 'notebooks', icon: 'book',     render: renderUpcoming,  onLeave: null },
+    { id: 'notebooks', icon: 'book',     render: renderNotebooks, onLeave: null },
     { id: 'settings',  icon: 'settings', render: renderUpcoming,  onLeave: null },
     // Hidden — reachable from the dashboard alert when setup is needed.
     { id: 'wizard',    icon: 'wrench',   render: renderWizard,    onLeave: null, hidden: true },
@@ -500,6 +520,131 @@ async function wizardRunAll() {
     try { await window.go.main.App.RunSetupAll(); }
     catch (e) { /* surfaced per-step */ }
     paintWizard(document.getElementById('content'));
+}
+
+/* ---------- HDFS tab ------------------------------------------------------ */
+async function renderHDFS(root) {
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actHdfsRefresh">' + iconHTML('refresh') + ' ' + t('hdfs.refresh') + '</button>';
+    document.getElementById('actHdfsRefresh').addEventListener('click', () => renderHDFS(root));
+
+    root.innerHTML = '<div class="c-hdfs-tree" id="hdfsTree"><div class="c-placeholder">…</div></div>';
+    const treeRoot = document.getElementById('hdfsTree');
+    treeRoot.innerHTML = '';
+
+    const rootNode = await hdfsBuildNode('/', t('hdfs.root'), true);
+    treeRoot.appendChild(rootNode);
+}
+
+async function hdfsBuildNode(path, label, expandedInitially) {
+    const node = document.createElement('div');
+    node.className = 'c-hdfs-node';
+    const isDir = true;
+    node.innerHTML =
+        '<div class="c-hdfs-node__row" data-path="' + esc(path) + '">' +
+            '<span class="c-hdfs-node__chev">▶</span> ' +
+            iconHTML('folder') + ' <strong>' + esc(label) + '</strong>' +
+        '</div>' +
+        '<div class="c-hdfs-node__children" style="display:none;"></div>';
+    const row = node.querySelector('.c-hdfs-node__row');
+    const childrenEl = node.querySelector('.c-hdfs-node__children');
+    let loaded = false;
+
+    async function toggle() {
+        if (!loaded) {
+            try {
+                const entries = await window.go.main.App.ListHDFS(path);
+                if (!entries || entries.length === 0) {
+                    childrenEl.innerHTML = '<div class="c-hdfs-empty">' + t('hdfs.empty') + '</div>';
+                } else {
+                    childrenEl.innerHTML = '';
+                    entries.sort((a, b) => (a.type === b.type) ? a.name.localeCompare(b.name) : (a.type === 'DIRECTORY' ? -1 : 1));
+                    for (const entry of entries) {
+                        if (entry.type === 'DIRECTORY') {
+                            const child = await hdfsBuildNode(joinPath(path, entry.name), entry.name, false);
+                            childrenEl.appendChild(child);
+                        } else {
+                            const f = document.createElement('div');
+                            f.className = 'c-hdfs-file';
+                            f.innerHTML = iconHTML('book') + ' ' + esc(entry.name) +
+                                ' <small style="color:var(--color-text-muted);">' + humanSize(entry.length) + '</small>';
+                            childrenEl.appendChild(f);
+                        }
+                    }
+                }
+            } catch (e) {
+                childrenEl.innerHTML = '<div class="c-alert c-alert--danger">' + iconHTML('alert') + '<div>' + t('hdfs.error') + '<br/><small>' + esc(String(e)) + '</small></div></div>';
+            }
+            loaded = true;
+        }
+        const expanded = childrenEl.style.display !== 'none';
+        childrenEl.style.display = expanded ? 'none' : 'block';
+        row.querySelector('.c-hdfs-node__chev').textContent = expanded ? '▶' : '▼';
+    }
+
+    row.addEventListener('click', toggle);
+    if (expandedInitially) await toggle();
+    return node;
+}
+
+function joinPath(a, b) {
+    if (a === '/' || a === '') return '/' + b;
+    return a.replace(/\/$/, '') + '/' + b;
+}
+
+function humanSize(bytes) {
+    if (!bytes) return '0';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0; let n = Number(bytes);
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+
+/* ---------- Notebooks tab ------------------------------------------------- */
+async function renderNotebooks(root) {
+    document.getElementById('viewActions').innerHTML = '';
+
+    let files = [];
+    try { files = await window.go.main.App.ListNotebooks() || []; } catch (e) {}
+
+    const jurl = await (window.go.main.App.JupyterURL ? window.go.main.App.JupyterURL() : Promise.resolve(''));
+    const jupyterReady = !!jurl;
+    const warning = jupyterReady ? '' :
+        '<div class="c-alert c-alert--warn">' + iconHTML('alert') + '<div>' + t('notebooks.needsJupyter') + '</div></div>';
+
+    if (!files.length) {
+        root.innerHTML = warning + '<div class="c-placeholder">' + t('notebooks.empty') + '</div>';
+        return;
+    }
+
+    const rows = files.map(f => {
+        const date = new Date(f.modTime).toLocaleString();
+        const size = f.isDir ? '—' : humanSize(f.size);
+        const icon = f.isDir ? 'folder' : 'book';
+        const openBtn = (!f.isDir && jupyterReady) ?
+            '<button class="c-btn c-btn--primary" data-open="' + esc(f.name) + '">' + iconHTML('book') + ' ' + t('notebooks.open') + '</button>' : '';
+        return '<tr>' +
+            '<td>' + iconHTML(icon) + ' ' + esc(f.name) + '</td>' +
+            '<td>' + size + '</td>' +
+            '<td>' + esc(date) + '</td>' +
+            '<td class="c-table__actions">' + openBtn + '</td>' +
+        '</tr>';
+    }).join('');
+
+    root.innerHTML = warning +
+        '<table class="c-table"><thead><tr>' +
+            '<th>' + t('notebooks.col.name') + '</th>' +
+            '<th>' + t('notebooks.col.size') + '</th>' +
+            '<th>' + t('notebooks.col.mod')  + '</th>' +
+            '<th></th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+    root.querySelectorAll('button[data-open]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try { await window.go.main.App.OpenNotebook(btn.dataset.open); }
+            catch (e) { alert('Error: ' + e); }
+        });
+    });
 }
 
 /* ---------- Repair tab ---------------------------------------------------- */

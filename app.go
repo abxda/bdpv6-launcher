@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/abxda/bdpv6-launcher/internal/hdfsfs"
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
 	"github.com/abxda/bdpv6-launcher/internal/ports"
@@ -405,4 +409,76 @@ func (a *App) GetRepairLogs() []logsink.Line {
 		return nil
 	}
 	return a.repairSink.Snapshot()
+}
+
+// --- HDFS explorer ---------------------------------------------------------
+
+// ListHDFS returns the WebHDFS LISTSTATUS for the given path (use "/" for
+// root). Lazy-loaded by the frontend tree on click.
+func (a *App) ListHDFS(path string) ([]hdfsfs.Entry, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 4*time.Second)
+	defer cancel()
+	port := 9870
+	if svc, ok := a.registry.Get("hdfs_namenode"); ok {
+		port = svc.Port()
+	}
+	c := hdfsfs.New(fmt.Sprintf("http://127.0.0.1:%d", port), "")
+	return c.List(ctx, path)
+}
+
+// --- Notebooks tab --------------------------------------------------------
+
+// NotebookFile is one entry shown in the Notebooks tab.
+type NotebookFile struct {
+	Name     string `json:"name"`
+	Size     int64  `json:"size"`
+	ModTime  int64  `json:"modTime"` // unix millis
+	IsDir    bool   `json:"isDir"`
+}
+
+// ListNotebooks returns the contents of paths.Notebooks (non-recursive).
+// .ipynb_checkpoints and dotfiles are filtered out to keep the list tidy.
+func (a *App) ListNotebooks() ([]NotebookFile, error) {
+	dir := a.paths.Notebooks
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// Returning an empty slice is friendlier than an error for the UI;
+		// the user just sees "no notebooks".
+		return []NotebookFile{}, nil
+	}
+	out := make([]NotebookFile, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, NotebookFile{
+			Name: name, Size: info.Size(),
+			ModTime: info.ModTime().UnixMilli(), IsDir: e.IsDir(),
+		})
+	}
+	return out, nil
+}
+
+// OpenNotebook builds the Jupyter URL for a notebook file (relative to
+// paths.Notebooks) and asks the system browser to open it. Requires
+// Jupyter to be running (so we have its token).
+func (a *App) OpenNotebook(name string) error {
+	jurl := a.JupyterURL()
+	if jurl == "" {
+		return fmt.Errorf("Jupyter no está corriendo o aún no expone token")
+	}
+	// jurl is e.g. http://127.0.0.1:8888/lab?token=abc
+	// We want http://127.0.0.1:8888/lab/tree/<name>?token=abc so the file opens.
+	u, err := url.Parse(jurl)
+	if err != nil {
+		return err
+	}
+	u.Path = "/lab/tree/" + name
+	wailsruntime.BrowserOpenURL(a.ctx, u.String())
+	return nil
 }
