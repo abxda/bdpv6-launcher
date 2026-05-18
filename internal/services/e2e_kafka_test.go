@@ -5,14 +5,28 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
 )
+
+// randomTestUUID returns a fresh 22-char base64url cluster id per run, so
+// tests against a real BDP distribution do not bake a fixed "TestE2E_*"
+// string into the user's Kafka metadata.
+func randomTestUUID(t *testing.T) string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(b[:]), "=")
+}
 
 // TestE2E_KafkaFormat regression-tests the bypass of kafka-storage.bat.
 // Before the fix, the .bat overflowed cmd.exe's 8191-char limit when its
@@ -58,7 +72,8 @@ func TestE2E_KafkaFormat(t *testing.T) {
 	// path does.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	uuid := "TestE2E_KafkaFormatXX" // 22 chars, base64url-shaped
+	uuid := randomTestUUID(t)
+	t.Logf("using cluster id: %s", uuid)
 	if err := runJavaStorageFormat(ctx, p, uuid); err != nil {
 		t.Fatalf("kafka format failed: %v", err)
 	}
