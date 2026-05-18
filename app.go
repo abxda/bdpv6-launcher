@@ -217,11 +217,14 @@ type EnvInfo struct {
 	ServicePaths      map[string]string `json:"servicePaths"`
 
 	// Setup state inferred from the filesystem (not from a persisted flag).
-	// All three must be true for SetupNeeded to be false on the dashboard.
-	HadoopConfigGenerated bool `json:"hadoopConfigGenerated"`
-	NamenodeFormatted     bool `json:"namenodeFormatted"`
-	KafkaFormatted        bool `json:"kafkaFormatted"`
-	SetupNeeded           bool `json:"setupNeeded"`
+	// All four conditions must be true for SetupNeeded to be false on the
+	// dashboard: Hadoop XMLs generated, NameNode formatted (not just empty,
+	// not corrupted), Kafka formatted.
+	HadoopConfigGenerated bool                `json:"hadoopConfigGenerated"`
+	NamenodeFormatted     bool                `json:"namenodeFormatted"`
+	NamenodeState         paths.NamenodeState `json:"namenodeState"`
+	KafkaFormatted        bool                `json:"kafkaFormatted"`
+	SetupNeeded           bool                `json:"setupNeeded"`
 
 	// Legacy: the persisted state.SetupCompleted flag (still surfaced so
 	// callers that need to know "did the wizard run to completion in some
@@ -234,7 +237,8 @@ type EnvInfo struct {
 func (a *App) GetEnvInfo() EnvInfo {
 	ok, missing := a.paths.Validate()
 	hadoopOK := a.paths.HadoopConfigGenerated()
-	nnOK := a.paths.NamenodeFormatted()
+	nnState := a.paths.NamenodeStateOf()
+	nnOK := nnState == paths.NamenodeFormattedOK
 	kafkaOK := a.paths.KafkaFormatted()
 	return EnvInfo{
 		AppVersion:            AppVersion,
@@ -246,6 +250,7 @@ func (a *App) GetEnvInfo() EnvInfo {
 		ServicePaths:          a.paths.ServicePaths(),
 		HadoopConfigGenerated: hadoopOK,
 		NamenodeFormatted:     nnOK,
+		NamenodeState:         nnState,
 		KafkaFormatted:        kafkaOK,
 		SetupNeeded:           !(hadoopOK && nnOK && kafkaOK),
 		SetupCompleted:        a.state.Get().SetupCompleted,

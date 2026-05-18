@@ -98,6 +98,45 @@ func (p *Paths) NamenodeFormatted() bool {
 	return err == nil
 }
 
+// NamenodeState is what the dashboard reports about the on-disk HDFS state.
+type NamenodeState string
+
+const (
+	// NamenodeEmpty: namenode dir does not exist or has no current/. Means
+	// the user has never run the format step (or just cleaned the data dir).
+	NamenodeEmpty NamenodeState = "empty"
+	// NamenodeFormattedOK: current/VERSION exists. Hadoop will accept this
+	// dir as a valid formatted namenode.
+	NamenodeFormattedOK NamenodeState = "formatted"
+	// NamenodeCorrupted: current/ has stale files (edits_inprogress_*,
+	// in_use.lock, …) but no VERSION. This usually means a previous run
+	// was force-killed before HDFS could checkpoint. The data is
+	// unrecoverable; the user needs to reformat (which is destructive but
+	// the right move because the namespace metadata is already gone).
+	NamenodeCorruptedSt NamenodeState = "corrupted"
+)
+
+// NamenodeStateOf inspects the namenode directory and classifies it.
+func (p *Paths) NamenodeStateOf() NamenodeState {
+	curr := filepath.Join(p.Data, "hdfs", "namenode", "current")
+	if _, err := os.Stat(curr); err != nil {
+		// current/ does not exist — maybe the parent does (we created the
+		// data dirs at setup) but nothing inside. Either way: empty.
+		return NamenodeEmpty
+	}
+	version := filepath.Join(curr, "VERSION")
+	if _, err := os.Stat(version); err == nil {
+		return NamenodeFormattedOK
+	}
+	// current/ exists but VERSION does not. Check if anything inside —
+	// an empty current/ is just "fresh", not corrupted.
+	entries, err := os.ReadDir(curr)
+	if err != nil || len(entries) == 0 {
+		return NamenodeEmpty
+	}
+	return NamenodeCorruptedSt
+}
+
 // KafkaFormatted reports whether Kafka KRaft storage has been formatted —
 // the test is the presence of meta.properties inside the log dir defined by
 // server.properties. Kafka resolves log.dirs=./data/data_kraft relative to

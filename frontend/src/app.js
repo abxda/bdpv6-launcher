@@ -445,9 +445,19 @@ function renderDashboard(root) {
             '<p style="margin:8px 0 0; color:var(--color-text-muted); font-size:13px;">' + esc(detailParts.join(' · ')) + '</p>';
     } else {
         const missing = [];
-        if (!env.hadoopConfigGenerated) missing.push('<li>Hadoop XMLs no generados (core-site.xml / hdfs-site.xml)</li>');
-        if (!env.namenodeFormatted)     missing.push('<li>HDFS NameNode no formateado</li>');
-        if (!env.kafkaFormatted)        missing.push('<li>Kafka KRaft no formateado</li>');
+        if (!env.hadoopConfigGenerated) {
+            missing.push('<li>Hadoop XMLs no generados (core-site.xml / hdfs-site.xml)</li>');
+        }
+        if (!env.namenodeFormatted) {
+            // Distinguish empty from corrupted so the message is honest about
+            // why HDFS needs (re)formatting.
+            if (env.namenodeState === 'corrupted') {
+                missing.push('<li><strong>HDFS NameNode corrupto</strong> — un cierre forzoso anterior dejó el directorio sin <code>VERSION</code> ni <code>fsimage</code>. El asistente lo limpia automáticamente antes de reformatear.</li>');
+            } else {
+                missing.push('<li>HDFS NameNode no formateado</li>');
+            }
+        }
+        if (!env.kafkaFormatted) missing.push('<li>Kafka KRaft no formateado</li>');
         setupBody =
             '<div class="c-alert c-alert--warn">' + iconHTML('alert') +
                 '<div>' + t('dashboard.setupPending') +
