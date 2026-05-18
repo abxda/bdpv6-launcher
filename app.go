@@ -180,10 +180,13 @@ func (a *App) statusTickLoop() {
 
 // sysinfoTickLoop samples CPU/RAM and pushes "sysinfo:update" events the
 // dashboard renders as progress bars. 2 s cadence matches the legacy
-// PyQt5 launcher.
+// PyQt5 launcher. It piggybacks an "env:tick" event on the same cadence
+// carrying a fresh EnvInfo so the dashboard's setup-state badges reflect
+// reality without making the user reload.
 func (a *App) sysinfoTickLoop() {
 	sysinfo.Tick(a.ctx, 2*time.Second, func(s sysinfo.Sample) {
 		wailsruntime.EventsEmit(a.ctx, "sysinfo:update", s)
+		wailsruntime.EventsEmit(a.ctx, "env:tick", a.GetEnvInfo())
 	})
 }
 
@@ -212,22 +215,40 @@ type EnvInfo struct {
 	DistributionOK    bool              `json:"distributionOK"`
 	MissingDirs       []string          `json:"missingDirs"`
 	ServicePaths      map[string]string `json:"servicePaths"`
-	SetupCompleted    bool              `json:"setupCompleted"`
-	NamenodeFormatted bool              `json:"namenodeFormatted"`
+
+	// Setup state inferred from the filesystem (not from a persisted flag).
+	// All three must be true for SetupNeeded to be false on the dashboard.
+	HadoopConfigGenerated bool `json:"hadoopConfigGenerated"`
+	NamenodeFormatted     bool `json:"namenodeFormatted"`
+	KafkaFormatted        bool `json:"kafkaFormatted"`
+	SetupNeeded           bool `json:"setupNeeded"`
+
+	// Legacy: the persisted state.SetupCompleted flag (still surfaced so
+	// callers that need to know "did the wizard run to completion in some
+	// past session" can read it; the UI no longer relies on it).
+	SetupCompleted bool `json:"setupCompleted"`
 }
 
+// GetEnvInfo returns a fresh snapshot of the distribution state. Cheap
+// enough to call on every dashboard tick (a few stat() syscalls).
 func (a *App) GetEnvInfo() EnvInfo {
 	ok, missing := a.paths.Validate()
+	hadoopOK := a.paths.HadoopConfigGenerated()
+	nnOK := a.paths.NamenodeFormatted()
+	kafkaOK := a.paths.KafkaFormatted()
 	return EnvInfo{
-		AppVersion:        AppVersion,
-		OS:                runtime.GOOS,
-		Arch:              runtime.GOARCH,
-		ScriptDir:         a.paths.ScriptDir,
-		DistributionOK:    ok,
-		MissingDirs:       missing,
-		ServicePaths:      a.paths.ServicePaths(),
-		SetupCompleted:    a.state.Get().SetupCompleted,
-		NamenodeFormatted: a.paths.NamenodeFormatted(),
+		AppVersion:            AppVersion,
+		OS:                    runtime.GOOS,
+		Arch:                  runtime.GOARCH,
+		ScriptDir:             a.paths.ScriptDir,
+		DistributionOK:        ok,
+		MissingDirs:           missing,
+		ServicePaths:          a.paths.ServicePaths(),
+		HadoopConfigGenerated: hadoopOK,
+		NamenodeFormatted:     nnOK,
+		KafkaFormatted:        kafkaOK,
+		SetupNeeded:           !(hadoopOK && nnOK && kafkaOK),
+		SetupCompleted:        a.state.Get().SetupCompleted,
 	}
 }
 
@@ -408,13 +429,16 @@ func (a *App) ClearPortOverride(serviceID string) error {
 // --- first-run wizard ------------------------------------------------------
 
 // SetupNeeded returns whether the dashboard should show the "configure now"
-// alert. True when the user has not finished the wizard AND the NameNode is
-// not formatted yet.
+// alert. Inferred purely from the filesystem so that setup actions taken
+// outside the wizard (legacy setup_first_run.bat, manual Repair runs,
+// cleanup followed by re-format) reflect immediately on next dashboard
+// tick. The persisted state.SetupCompleted flag is no longer consulted —
+// it was brittle because the Orchestrator's step state resets per session
+// and never tripped the flag when only one step was re-run via Repair.
 func (a *App) SetupNeeded() bool {
-	if a.state.Get().SetupCompleted {
-		return false
-	}
-	return !a.paths.NamenodeFormatted()
+	return !(a.paths.HadoopConfigGenerated() &&
+		a.paths.NamenodeFormatted() &&
+		a.paths.KafkaFormatted())
 }
 
 // GetSetupSteps returns the wizard steps with their current status.

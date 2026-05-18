@@ -98,6 +98,25 @@ func (p *Paths) NamenodeFormatted() bool {
 	return err == nil
 }
 
+// KafkaFormatted reports whether Kafka KRaft storage has been formatted —
+// the test is the presence of meta.properties inside the log dir defined by
+// server.properties. Kafka resolves log.dirs=./data/data_kraft relative to
+// the cwd we pass on launch (== paths.Kafka), so the on-disk location is
+// kafka_kraft/data/data_kraft/meta.properties, not the top-level data/.
+func (p *Paths) KafkaFormatted() bool {
+	marker := filepath.Join(p.Kafka, "data", "data_kraft", "meta.properties")
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
+// HadoopConfigGenerated reports whether the Hadoop XMLs have been generated
+// by the setup wizard. We test core-site.xml because the wizard writes both
+// XMLs in one shot; if one is present so is the other.
+func (p *Paths) HadoopConfigGenerated() bool {
+	_, err := os.Stat(p.CoreSiteXML())
+	return err == nil
+}
+
 // JavaBinary returns the absolute path to the JDK java executable bundled
 // with the distribution. Honours OS-specific naming.
 func (p *Paths) JavaBinary() string {

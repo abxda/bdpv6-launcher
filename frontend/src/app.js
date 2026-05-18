@@ -59,8 +59,8 @@ const STR = {
         'dashboard.setup':        'Estado de configuración',
         'dashboard.missing':      'Faltan carpetas en la distribución:',
         'dashboard.layoutOK':     'Distribución BDP detectada correctamente. Todas las carpetas de servicio están presentes junto al launcher.',
-        'dashboard.setupPending': 'La configuración inicial aún no se ha ejecutado. El asistente arrancará la próxima vez que inicies los servicios (disponible en la fase F5).',
-        'dashboard.setupDone':    'Configuración inicial completada.',
+        'dashboard.setupPending': 'Falta(n) artefacto(s) de configuración. Ejecuta el asistente para completar lo siguiente:',
+        'dashboard.setupDone':    'Configuración detectada correctamente.',
         'dashboard.namenodeMissing':'NameNode HDFS no formateado.',
         'dashboard.services':     'Servicios',
         'services.startAll':      'Iniciar TODO',
@@ -175,8 +175,8 @@ const STR = {
         'dashboard.setup':        'Setup status',
         'dashboard.missing':      'Missing folders in the distribution:',
         'dashboard.layoutOK':     'BDP layout detected correctly. All service folders are present next to the launcher.',
-        'dashboard.setupPending': 'Initial setup has not run yet. The wizard will start the next time you start services (delivered in phase F5).',
-        'dashboard.setupDone':    'Initial setup complete.',
+        'dashboard.setupPending': 'Setup artefact(s) missing. Run the wizard to complete the following:',
+        'dashboard.setupDone':    'Setup artefacts detected.',
         'dashboard.namenodeMissing':'HDFS NameNode not formatted.',
         'dashboard.services':     'Services',
         'services.startAll':      'Start ALL',
@@ -341,6 +341,14 @@ function subscribeRuntimeEvents() {
         if (currentView === 'dashboard') updateSysinfoWidgets();
     });
 
+    // env:tick replaces the previously cached envInfo so the dashboard's
+    // setup-state badges reflect changes (wizard completion, Repair >
+    // Reformat, cleanup) without the user having to restart the launcher.
+    window.runtime.EventsOn('env:tick', (env) => {
+        STATE.envInfo = env;
+        if (currentView === 'dashboard') renderDashboard(document.getElementById('content'));
+    });
+
     // One subscription per service for live log streaming.
     for (const svc of STATE.services) {
         const eventName = 'service:' + svc.id + ':log';
@@ -423,12 +431,31 @@ function renderDashboard(root) {
             '<div>' + t('dashboard.missing') + '<ul style="margin:6px 0 0;">' + list + '</ul></div></div>'));
     }
 
-    const setupBody = env.setupCompleted
-        ? '<span class="c-badge c-badge--ok">' + iconHTML('check') + ' ' + t('dashboard.setupDone') + '</span>'
-        : '<div class="c-alert c-alert--warn">' + iconHTML('alert') + '<div>' + t('dashboard.setupPending') +
-          (!env.namenodeFormatted ? '<br/><small>' + t('dashboard.namenodeMissing') + '</small>' : '') +
-          '<br/><br/><button class="c-btn c-btn--primary" id="actStartWizard">' + iconHTML('wrench') + ' ' + t('wizard.startSetup') + '</button>' +
-          '</div></div>';
+    // Setup state is inferred from filesystem markers, so every reload of
+    // the dashboard reflects reality. The three flags (hadoop XMLs, HDFS
+    // namenode VERSION, kafka meta.properties) drive the alert.
+    let setupBody;
+    if (!env.setupNeeded) {
+        const detailParts = [];
+        if (env.hadoopConfigGenerated) detailParts.push('Hadoop configurado');
+        if (env.namenodeFormatted)     detailParts.push('HDFS formateado');
+        if (env.kafkaFormatted)        detailParts.push('Kafka formateado');
+        setupBody =
+            '<span class="c-badge c-badge--ok">' + iconHTML('check') + ' ' + t('dashboard.setupDone') + '</span>' +
+            '<p style="margin:8px 0 0; color:var(--color-text-muted); font-size:13px;">' + esc(detailParts.join(' · ')) + '</p>';
+    } else {
+        const missing = [];
+        if (!env.hadoopConfigGenerated) missing.push('<li>Hadoop XMLs no generados (core-site.xml / hdfs-site.xml)</li>');
+        if (!env.namenodeFormatted)     missing.push('<li>HDFS NameNode no formateado</li>');
+        if (!env.kafkaFormatted)        missing.push('<li>Kafka KRaft no formateado</li>');
+        setupBody =
+            '<div class="c-alert c-alert--warn">' + iconHTML('alert') +
+                '<div>' + t('dashboard.setupPending') +
+                    '<ul style="margin: 6px 0 12px;">' + missing.join('') + '</ul>' +
+                    '<button class="c-btn c-btn--primary" id="actStartWizard">' + iconHTML('wrench') + ' ' + t('wizard.startSetup') + '</button>' +
+                '</div>' +
+            '</div>';
+    }
     cards.push(card(t('dashboard.setup'), setupBody));
 
     // Compact services summary
