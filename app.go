@@ -2,67 +2,148 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"runtime"
+	"sync"
+	"time"
 
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
+	"github.com/abxda/bdpv6-launcher/internal/services"
 	"github.com/abxda/bdpv6-launcher/internal/state"
 )
 
-// App holds the application context and exposes methods bound to the JS
-// frontend via Wails. Methods that should be callable from JS must be
-// exported (capitalised) and receive serialisable arguments.
+// App is the Wails-bound type. Methods exported (capitalised) become callable
+// from JS as window.go.main.App.<Method>(...). Methods that need to emit
+// events to the frontend use the ctx captured during startup.
 type App struct {
-	ctx   context.Context
-	paths *paths.Paths
-	state *state.Store
+	ctx context.Context
+
+	paths    *paths.Paths
+	state    *state.Store
+	registry *services.Registry
+
+	logSubsMu sync.Mutex
+	logSubs   map[string]int // service id → logsink sub id, so we can detach on shutdown
 }
+
+const AppVersion = "0.2.0"
 
 func NewApp() *App {
 	p := paths.Detect()
-	return &App{
-		paths: p,
-		state: state.NewStore(p.StateFile),
+	a := &App{
+		paths:    p,
+		state:    state.NewStore(p.StateFile),
+		registry: services.NewRegistry(),
+		logSubs:  map[string]int{},
 	}
+	return a
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// Best-effort load; if it fails, the in-memory defaults remain.
 	_ = a.state.Load()
+	a.bootstrapServices()
+	a.attachLogStreams()
+	go a.statusTickLoop()
 }
 
 func (a *App) domReady(ctx context.Context) {}
 
+// beforeClose is invoked when the user clicks the X button. We do NOT block
+// here — shutdown() handles the actual cleanup, and beforeClose is meant for
+// "show a confirmation prompt" use cases.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
-	// F2 will gracefully stop running services here. For F1, just allow close.
 	return false
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = a.registry.StopAll(stopCtx)
+	for _, svc := range a.registry.All() {
+		if sink := svc.Logs(); sink != nil {
+			_ = sink.Close()
+		}
+	}
 	_ = a.state.Save()
 }
 
-// --- Bound methods (callable from JS as window.go.main.App.*) ---
-
-// EnvInfo describes the host environment and the resolved distribution
-// layout. Returned to the frontend on startup so the UI can show the
-// detected paths, version, and whether the distribution is well-formed.
-type EnvInfo struct {
-	AppVersion       string            `json:"appVersion"`
-	OS               string            `json:"os"`
-	Arch             string            `json:"arch"`
-	ScriptDir        string            `json:"scriptDir"`
-	DistributionOK   bool              `json:"distributionOK"`
-	MissingDirs      []string          `json:"missingDirs"`
-	ServicePaths     map[string]string `json:"servicePaths"`
-	SetupCompleted   bool              `json:"setupCompleted"`
-	NamenodeFormatted bool             `json:"namenodeFormatted"`
+// bootstrapServices instantiates one wrapper per BDP service using the
+// detected paths and the user's port/heap overrides from state.
+func (a *App) bootstrapServices() {
+	st := a.state.Get()
+	port := func(id string, defp int) int {
+		if v, ok := st.PortOverrides[id]; ok && v > 0 {
+			return v
+		}
+		return defp
+	}
+	heap := func(id string) string {
+		if v, ok := st.JVMHeap[id]; ok {
+			return v
+		}
+		return ""
+	}
+	a.registry.Register(services.NewElasticsearch(a.paths, port("elasticsearch", 9200), heap("elasticsearch")))
 }
 
-const AppVersion = "0.1.0"
+// attachLogStreams subscribes the App to every registered Sink and forwards
+// each new line as a Wails event the frontend can listen to.
+func (a *App) attachLogStreams() {
+	for _, svc := range a.registry.All() {
+		svc := svc // capture
+		sink := svc.Logs()
+		if sink == nil {
+			continue
+		}
+		subID, ch := sink.Subscribe()
+		a.logSubsMu.Lock()
+		a.logSubs[svc.ID()] = subID
+		a.logSubsMu.Unlock()
+		go func() {
+			eventName := "service:" + svc.ID() + ":log"
+			for line := range ch {
+				wailsruntime.EventsEmit(a.ctx, eventName, line)
+			}
+		}()
+	}
+}
 
-// GetEnvInfo returns the resolved environment and distribution layout.
-// Used by the frontend on first render and after any repair action.
+// statusTickLoop periodically pushes the full status map to the frontend so
+// it can rerender badges and PIDs without polling. Runs until the context
+// (Wails ctx) is cancelled on shutdown.
+func (a *App) statusTickLoop() {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-t.C:
+			wailsruntime.EventsEmit(a.ctx, "status:tick", a.registry.SortedStatuses())
+		}
+	}
+}
+
+// ============================================================================
+// Bound methods (callable from JS)
+// ============================================================================
+
+type EnvInfo struct {
+	AppVersion        string            `json:"appVersion"`
+	OS                string            `json:"os"`
+	Arch              string            `json:"arch"`
+	ScriptDir         string            `json:"scriptDir"`
+	DistributionOK    bool              `json:"distributionOK"`
+	MissingDirs       []string          `json:"missingDirs"`
+	ServicePaths      map[string]string `json:"servicePaths"`
+	SetupCompleted    bool              `json:"setupCompleted"`
+	NamenodeFormatted bool              `json:"namenodeFormatted"`
+}
+
 func (a *App) GetEnvInfo() EnvInfo {
 	ok, missing := a.paths.Validate()
 	return EnvInfo{
@@ -78,25 +159,68 @@ func (a *App) GetEnvInfo() EnvInfo {
 	}
 }
 
-// GetState returns the persisted user state (preferences, port overrides, …).
-func (a *App) GetState() state.State {
-	return a.state.Get()
-}
+func (a *App) GetState() state.State { return a.state.Get() }
 
-// SetLanguage persists the preferred UI language (es | en).
 func (a *App) SetLanguage(lang string) error {
 	if lang != "es" && lang != "en" {
 		lang = "es"
 	}
-	return a.state.Update(func(s *state.State) {
-		s.Language = lang
-	})
+	return a.state.Update(func(s *state.State) { s.Language = lang })
 }
 
-// SetAlwaysOnTop persists the toggle. The Wails runtime side-effect (actually
-// pinning the window) will be wired in F8.
 func (a *App) SetAlwaysOnTop(v bool) error {
-	return a.state.Update(func(s *state.State) {
-		s.AlwaysOnTop = v
-	})
+	return a.state.Update(func(s *state.State) { s.AlwaysOnTop = v })
+}
+
+// --- service control --------------------------------------------------------
+
+// ServiceMeta is the static (non-runtime) view of a service. Used by the UI
+// to render the Services tab even when nothing has started yet.
+type ServiceMeta struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Port int    `json:"port"`
+}
+
+func (a *App) ListServices() []ServiceMeta {
+	out := []ServiceMeta{}
+	for _, svc := range a.registry.All() {
+		out = append(out, ServiceMeta{ID: svc.ID(), Name: svc.Name(), Port: svc.Port()})
+	}
+	return out
+}
+
+func (a *App) GetStatuses() []services.Status { return a.registry.SortedStatuses() }
+
+func (a *App) StartService(id string) error {
+	svc, ok := a.registry.Get(id)
+	if !ok {
+		return fmt.Errorf("servicio desconocido: %s", id)
+	}
+	return svc.Start(a.ctx)
+}
+
+func (a *App) StopService(id string) error {
+	svc, ok := a.registry.Get(id)
+	if !ok {
+		return fmt.Errorf("servicio desconocido: %s", id)
+	}
+	return svc.Stop(a.ctx)
+}
+
+// GetServiceLogs returns the ring buffer snapshot for a given service. The
+// frontend uses this on console open, then subscribes to live updates via
+// the runtime events.
+func (a *App) GetServiceLogs(id string) []logsink.Line {
+	svc, ok := a.registry.Get(id)
+	if !ok || svc.Logs() == nil {
+		return nil
+	}
+	return svc.Logs().Snapshot()
+}
+
+func (a *App) ClearServiceLogs(id string) {
+	if svc, ok := a.registry.Get(id); ok && svc.Logs() != nil {
+		svc.Logs().Clear()
+	}
 }
