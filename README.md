@@ -7,8 +7,8 @@ launcher replaces two divergent PyQt5 launchers (`BDPV4_WIN/launcher.py` and
 `BDPV5_macOS/.../launcher.py`) with a single Go + Wails v2 binary that runs
 on Windows and macOS.
 
-> **Status:** F1 (skeleton). See [`docs/PLAN.md`](./docs/PLAN.md) for the
-> nine-phase roadmap.
+> **Status:** all nine phases delivered. See [`docs/PLAN.md`](./docs/PLAN.md)
+> for the design and verification plan.
 
 ## Why
 
@@ -112,14 +112,31 @@ Output: `build/bin/BDPV6 Launcher.app`.
 | Phase | Deliverable                                            | Status |
 | ----- | ------------------------------------------------------ | ------ |
 | F1    | Wails skeleton + paths + state                         | done   |
-| F2    | Process control + first service (Elasticsearch)        | next   |
-| F3    | Remaining services (Kafka, HDFS NN/DN, Jupyter)        |        |
-| F4    | Ports tab + collision detection                        |        |
-| F5    | First-run wizard + setup                               |        |
-| F6    | Repair tab (unified cleanup / reformat / repair)       |        |
-| F7    | HDFS explorer + notebooks                              |        |
-| F8    | Settings + i18n + design polish                        |        |
-| F9    | End-to-end verification + docs + distro cleanup        |        |
+| F2    | Process control + first service (Elasticsearch)        | done   |
+| F3    | Remaining services (Kafka, HDFS NN/DN, Jupyter)        | done   |
+| F4    | Ports tab + collision detection                        | done   |
+| F5    | First-run wizard + setup                               | done   |
+| F6    | Repair tab (unified cleanup / reformat / repair)       | done   |
+| F7    | HDFS explorer + notebooks                              | done   |
+| F8    | Settings + i18n + design polish                        | done   |
+| F9    | End-to-end verification + docs + distro cleanup        | done   |
+
+## Tests
+
+```bash
+# Unit / integration (fast, no external dependencies)
+go test ./...
+
+# Real end-to-end against a populated BDP distribution. Spawns the bundled
+# Java services for ~30 s each, so it is opt-in via the `e2e` build tag.
+BDP_DIST=D:\BDP\BDPV4_WIN go test -tags=e2e -timeout 180s ./internal/services -run TestE2E_Elasticsearch -v
+```
+
+The E2E test in `internal/services/e2e_test.go` confirms that
+processctl, sinkWriter, logsink, and the HTTP health probe form a
+working pipeline end-to-end. It was used to validate F9 on a real
+distribution: Elasticsearch became healthy in 24 s, then was stopped
+cleanly with no leftover `java.exe` process.
 
 ## License
 
