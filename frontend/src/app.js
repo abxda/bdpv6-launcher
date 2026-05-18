@@ -103,6 +103,16 @@ const STR = {
         'ports.suggestApplied':   'Sugerido: {0}. Guardado como override.',
         'ports.noFree':           'No se encontró puerto libre cercano.',
         'ports.help':             'Las filas en rojo están ocupadas por otro proceso. Usa "Sugerir libre" para encontrar un puerto alternativo o cierra el proceso conflictivo.',
+        'view.wizard.title':      'Configuración inicial',
+        'wizard.intro':           'Este asistente prepara el entorno BDP la primera vez que lo usas. Solo necesitas ejecutarlo una vez por distribución.',
+        'wizard.runAll':          'Ejecutar todo',
+        'wizard.runStep':         'Ejecutar',
+        'wizard.backToDashboard': 'Volver al Dashboard',
+        'wizard.startSetup':      'Iniciar configuración',
+        'wizard.status.pending':  'Pendiente',
+        'wizard.status.running':  'Ejecutando…',
+        'wizard.status.done':     'Completado',
+        'wizard.status.failed':   'Falló',
         'placeholder.upcoming':   'Esta vista se entrega en una fase posterior del plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -173,6 +183,16 @@ const STR = {
         'ports.suggestApplied':   'Suggested: {0}. Saved as override.',
         'ports.noFree':           'No free port found nearby.',
         'ports.help':             'Rows in red are bound by another process. Use "Suggest free" to find an alternative, or close the conflicting process.',
+        'view.wizard.title':      'First-run setup',
+        'wizard.intro':           'This wizard prepares the BDP environment the first time you use it. You only need to run it once per distribution.',
+        'wizard.runAll':          'Run all',
+        'wizard.runStep':         'Run',
+        'wizard.backToDashboard': 'Back to Dashboard',
+        'wizard.startSetup':      'Start setup',
+        'wizard.status.pending':  'Pending',
+        'wizard.status.running':  'Running…',
+        'wizard.status.done':     'Done',
+        'wizard.status.failed':   'Failed',
         'placeholder.upcoming':   'This view will be delivered in a later phase of the plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -204,6 +224,8 @@ const VIEWS = [
     { id: 'repair',    icon: 'wrench',   render: renderUpcoming,  onLeave: null },
     { id: 'notebooks', icon: 'book',     render: renderUpcoming,  onLeave: null },
     { id: 'settings',  icon: 'settings', render: renderUpcoming,  onLeave: null },
+    // Hidden — reachable from the dashboard alert when setup is needed.
+    { id: 'wizard',    icon: 'wrench',   render: renderWizard,    onLeave: null, hidden: true },
 ];
 
 let currentView = 'dashboard';
@@ -266,6 +288,7 @@ function renderNav() {
     const nav = document.getElementById('nav');
     nav.innerHTML = '';
     for (const v of VIEWS) {
+        if (v.hidden) continue;
         const btn = document.createElement('button');
         btn.className = 'c-sidebar__nav-item' + (v.id === currentView ? ' is-active' : '');
         btn.innerHTML = iconHTML(v.icon) + '<span>' + t('nav.' + v.id) + '</span>';
@@ -289,8 +312,10 @@ function renderView(id) {
     document.getElementById('viewTitle').textContent = t('view.' + id + '.title');
     document.getElementById('viewActions').innerHTML = '';
     document.getElementById('content').innerHTML = '';
+    // Update only visible nav items.
+    const visibleViews = VIEWS.filter(v => !v.hidden);
     document.querySelectorAll('.c-sidebar__nav-item').forEach((el, i) => {
-        el.classList.toggle('is-active', VIEWS[i].id === id);
+        el.classList.toggle('is-active', visibleViews[i] && visibleViews[i].id === id);
     });
     v.render(document.getElementById('content'));
 }
@@ -320,7 +345,9 @@ function renderDashboard(root) {
     const setupBody = env.setupCompleted
         ? '<span class="c-badge c-badge--ok">' + iconHTML('check') + ' ' + t('dashboard.setupDone') + '</span>'
         : '<div class="c-alert c-alert--warn">' + iconHTML('alert') + '<div>' + t('dashboard.setupPending') +
-          (!env.namenodeFormatted ? '<br/><small>' + t('dashboard.namenodeMissing') + '</small>' : '') + '</div></div>';
+          (!env.namenodeFormatted ? '<br/><small>' + t('dashboard.namenodeMissing') + '</small>' : '') +
+          '<br/><br/><button class="c-btn c-btn--primary" id="actStartWizard">' + iconHTML('wrench') + ' ' + t('wizard.startSetup') + '</button>' +
+          '</div></div>';
     cards.push(card(t('dashboard.setup'), setupBody));
 
     // Compact services summary
@@ -353,6 +380,100 @@ function renderDashboard(root) {
         '<div class="c-kv">' + kvHTML + '</div>', 'grid-column:1 / -1;'));
 
     root.innerHTML = '<div class="c-card-grid">' + cards.join('') + '</div>';
+
+    const wizBtn = document.getElementById('actStartWizard');
+    if (wizBtn) wizBtn.addEventListener('click', () => renderView('wizard'));
+}
+
+/* ---------- Wizard (hidden view, reached from Dashboard) ------------------ */
+const SETUP_LOG_KEY = '__setup__';
+
+async function renderWizard(root) {
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actWizardBack">' + iconHTML('layout') + ' ' + t('wizard.backToDashboard') + '</button>' +
+        '<button class="c-btn c-btn--primary" id="actWizardRunAll">' + iconHTML('play') + ' ' + t('wizard.runAll') + '</button>';
+    document.getElementById('actWizardBack').addEventListener('click', () => renderView('dashboard'));
+    document.getElementById('actWizardRunAll').addEventListener('click', wizardRunAll);
+
+    // Make sure we have logs and a setup:log subscription.
+    if (!STATE.logs[SETUP_LOG_KEY]) {
+        try { STATE.logs[SETUP_LOG_KEY] = await window.go.main.App.GetSetupLogs() || []; }
+        catch (e) { STATE.logs[SETUP_LOG_KEY] = []; }
+    }
+    if (!STATE._setupSubscribed && window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn('service:setup:log', (line) => {
+            if (!STATE.logs[SETUP_LOG_KEY]) STATE.logs[SETUP_LOG_KEY] = [];
+            STATE.logs[SETUP_LOG_KEY].push(line);
+            if (currentView === 'wizard') appendWizardLine(line);
+        });
+        STATE._setupSubscribed = true;
+    }
+
+    await paintWizard(root);
+}
+
+async function paintWizard(root) {
+    let steps = [];
+    try { steps = await window.go.main.App.GetSetupSteps() || []; } catch (e) { steps = []; }
+
+    const stepCards = steps.map(s => {
+        const badge = (
+            s.status === 'done'    ? '<span class="c-badge c-badge--ok">'    + iconHTML('check') + ' ' + t('wizard.status.done')    + '</span>' :
+            s.status === 'running' ? '<span class="c-badge c-badge--info">'  + t('wizard.status.running') + '</span>' :
+            s.status === 'failed'  ? '<span class="c-badge c-badge--danger">' + iconHTML('alert') + ' ' + t('wizard.status.failed') + '</span>' :
+                                     '<span class="c-badge c-badge--muted">'  + t('wizard.status.pending') + '</span>'
+        );
+        const err = s.errorMsg ? '<small style="color:var(--color-danger); display:block; margin-top:6px;">' + esc(s.errorMsg) + '</small>' : '';
+        return '<div class="c-card">' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">' +
+                '<div><strong>' + esc(s.name) + '</strong> ' + badge + '</div>' +
+                '<button class="c-btn c-btn--primary" data-step="' + s.id + '">' + iconHTML('play') + ' ' + t('wizard.runStep') + '</button>' +
+            '</div>' +
+            '<small style="color:var(--color-text-muted);">' + esc(s.description) + '</small>' +
+            err +
+        '</div>';
+    }).join('');
+
+    root.innerHTML =
+        '<div class="c-alert c-alert--info">' + iconHTML('info') + '<div>' + t('wizard.intro') + '</div></div>' +
+        '<div class="c-card-grid" style="margin-bottom: var(--s-5);">' + stepCards + '</div>' +
+        '<div class="c-console" style="height: 320px;">' +
+            '<div class="c-console__toolbar"><strong style="color:var(--color-text-muted);">Salida del asistente</strong></div>' +
+            '<pre class="c-console__pane" id="wizardPane"></pre>' +
+        '</div>';
+
+    root.querySelectorAll('button[data-step]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try { await window.go.main.App.RunSetupStep(btn.dataset.step); }
+            catch (e) { /* surfaced via step.errorMsg on repaint */ }
+            paintWizard(root);
+        });
+    });
+
+    paintWizardLog();
+}
+
+function paintWizardLog() {
+    const pane = document.getElementById('wizardPane');
+    if (!pane) return;
+    const lines = STATE.logs[SETUP_LOG_KEY] || [];
+    if (!lines.length) { pane.innerHTML = '<span style="color:var(--color-text-muted);">(sin salida aún)</span>'; return; }
+    pane.innerHTML = lines.map(formatLineHTML).join('\n');
+    pane.scrollTop = pane.scrollHeight;
+}
+
+function appendWizardLine(line) {
+    const pane = document.getElementById('wizardPane');
+    if (!pane) return;
+    if (pane.children.length === 1 && !pane.children[0].classList) pane.innerHTML = '';
+    pane.insertAdjacentHTML('beforeend', formatLineHTML(line) + '\n');
+    pane.scrollTop = pane.scrollHeight;
+}
+
+async function wizardRunAll() {
+    try { await window.go.main.App.RunSetupAll(); }
+    catch (e) { /* surfaced per-step */ }
+    paintWizard(document.getElementById('content'));
 }
 
 /* ---------- Services tab -------------------------------------------------- */

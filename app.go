@@ -13,6 +13,7 @@ import (
 	"github.com/abxda/bdpv6-launcher/internal/paths"
 	"github.com/abxda/bdpv6-launcher/internal/ports"
 	"github.com/abxda/bdpv6-launcher/internal/services"
+	"github.com/abxda/bdpv6-launcher/internal/setup"
 	"github.com/abxda/bdpv6-launcher/internal/state"
 )
 
@@ -26,6 +27,9 @@ type App struct {
 	state    *state.Store
 	registry *services.Registry
 
+	setupSink *logsink.Sink
+	setup     *setup.Orchestrator
+
 	logSubsMu sync.Mutex
 	logSubs   map[string]int // service id → logsink sub id, so we can detach on shutdown
 }
@@ -34,11 +38,15 @@ const AppVersion = "0.2.0"
 
 func NewApp() *App {
 	p := paths.Detect()
+	st := state.NewStore(p.StateFile)
+	setupSink := logsink.New("setup", p.Logs, 2000)
 	a := &App{
-		paths:    p,
-		state:    state.NewStore(p.StateFile),
-		registry: services.NewRegistry(),
-		logSubs:  map[string]int{},
+		paths:     p,
+		state:     st,
+		registry:  services.NewRegistry(),
+		setupSink: setupSink,
+		setup:     setup.New(p, st, setupSink),
+		logSubs:   map[string]int{},
 	}
 	return a
 }
@@ -115,6 +123,17 @@ func (a *App) attachLogStreams() {
 			eventName := "service:" + svc.ID() + ":log"
 			for line := range ch {
 				wailsruntime.EventsEmit(a.ctx, eventName, line)
+			}
+		}()
+	}
+
+	// Wizard / repair sink (id "setup") goes out under the same naming
+	// convention as services for frontend symmetry.
+	if a.setupSink != nil {
+		_, ch := a.setupSink.Subscribe()
+		go func() {
+			for line := range ch {
+				wailsruntime.EventsEmit(a.ctx, "service:setup:log", line)
 			}
 		}()
 	}
@@ -315,4 +334,36 @@ func (a *App) ClearPortOverride(serviceID string) error {
 			delete(s.PortOverrides, serviceID)
 		}
 	})
+}
+
+// --- first-run wizard ------------------------------------------------------
+
+// SetupNeeded returns whether the dashboard should show the "configure now"
+// alert. True when the user has not finished the wizard AND the NameNode is
+// not formatted yet.
+func (a *App) SetupNeeded() bool {
+	if a.state.Get().SetupCompleted {
+		return false
+	}
+	return !a.paths.NamenodeFormatted()
+}
+
+// GetSetupSteps returns the wizard steps with their current status.
+func (a *App) GetSetupSteps() []setup.Step { return a.setup.Steps() }
+
+// RunSetupStep executes one wizard step. Output streams via the
+// service:setup:log event, identical pattern to services.
+func (a *App) RunSetupStep(id string) error {
+	return a.setup.RunStep(a.ctx, id)
+}
+
+// RunSetupAll runs every wizard step in order, stopping on first failure.
+func (a *App) RunSetupAll() error { return a.setup.RunAll(a.ctx) }
+
+// GetSetupLogs returns the cached setup output (ring buffer snapshot).
+func (a *App) GetSetupLogs() []logsink.Line {
+	if a.setupSink == nil {
+		return nil
+	}
+	return a.setupSink.Snapshot()
 }
