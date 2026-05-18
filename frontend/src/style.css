@@ -344,3 +344,6 @@ body {
 /* Danger row highlight (used by the Ports tab to flag conflicting ports) */
 .c-table__row--danger td { background-color: var(--color-danger-bg); }
 .c-table__row--danger:hover td { background-color: #fecaca; }
+
+/* Danger-outlined card (Repair tab) */
+.c-card--danger-outline { border-color: var(--color-danger); border-left-width: 3px; }

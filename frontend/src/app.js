@@ -113,6 +113,19 @@ const STR = {
         'wizard.status.running':  'Ejecutando…',
         'wizard.status.done':     'Completado',
         'wizard.status.failed':   'Falló',
+        'repair.intro':           'Acciones destructivas para recuperar un entorno corrupto. Cada acción pide confirmación explícita antes de ejecutarse.',
+        'repair.run':             'Ejecutar',
+        'repair.confirmKeyword':  'BORRAR',
+        'repair.confirmPrompt':   'Esta acción es destructiva.\\n\\nPara confirmar, escribe la palabra "{0}" (mayúsculas):',
+        'repair.cancelled':       'Acción cancelada.',
+        'repair.jupyter.title':   'Reparar Jupyter',
+        'repair.jupyter.desc':    'Desinstala y reinstala jupyter_core, jupyter_client, jupyter_server, notebook y jupyterlab usando el Python embebido. Útil si Jupyter no arranca o crashea al abrir un notebook. Requiere conexión a internet.',
+        'repair.clean.title':     'Limpiar datos y logs',
+        'repair.clean.desc':      'Borra completamente data/ y logs/ (incluyendo HDFS y Kafka). También limpia __pycache__ y resetea el estado de configuración. Equivale a partir de cero. NECESITARÁS RE-EJECUTAR EL ASISTENTE después.',
+        'repair.hdfs.title':      'Reformatear HDFS',
+        'repair.hdfs.desc':       'Re-ejecuta hdfs namenode -format. Pierdes todos los archivos en HDFS pero conservas Jupyter, Elasticsearch y Kafka. Útil si HDFS no arranca por estado sucio.',
+        'repair.kafka.title':     'Reformatear Kafka',
+        'repair.kafka.desc':      'Genera un nuevo cluster id y reformatea el log de KRaft. Pierdes todos los topics. Útil si Kafka no arranca por estado inconsistente.',
         'placeholder.upcoming':   'Esta vista se entrega en una fase posterior del plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -193,6 +206,19 @@ const STR = {
         'wizard.status.running':  'Running…',
         'wizard.status.done':     'Done',
         'wizard.status.failed':   'Failed',
+        'repair.intro':           'Destructive actions to recover a corrupted environment. Each action asks for explicit confirmation before running.',
+        'repair.run':             'Run',
+        'repair.confirmKeyword':  'DELETE',
+        'repair.confirmPrompt':   'This action is destructive.\\n\\nTo confirm, type the word "{0}" (uppercase):',
+        'repair.cancelled':       'Action cancelled.',
+        'repair.jupyter.title':   'Repair Jupyter',
+        'repair.jupyter.desc':    'Uninstall and reinstall jupyter_core, jupyter_client, jupyter_server, notebook and jupyterlab using the embedded Python. Useful when Jupyter will not start or crashes on notebook open. Requires internet.',
+        'repair.clean.title':     'Clean data and logs',
+        'repair.clean.desc':      'Wipes data/ and logs/ entirely (HDFS and Kafka included). Also clears __pycache__ and resets the setup state. Equivalent to starting from scratch. YOU WILL NEED TO RE-RUN THE WIZARD afterwards.',
+        'repair.hdfs.title':      'Reformat HDFS',
+        'repair.hdfs.desc':       'Re-runs hdfs namenode -format. You lose every file in HDFS but Jupyter, Elasticsearch and Kafka are preserved. Useful when HDFS will not start due to dirty state.',
+        'repair.kafka.title':     'Reformat Kafka',
+        'repair.kafka.desc':      'Generates a new cluster id and reformats the KRaft log. You lose every topic. Useful when Kafka will not start due to inconsistent state.',
         'placeholder.upcoming':   'This view will be delivered in a later phase of the plan.',
         'version.line':           'v{0} · {1}/{2}',
     },
@@ -221,7 +247,7 @@ const VIEWS = [
     { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh },
     { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null },
     { id: 'hdfs',      icon: 'folder',   render: renderUpcoming,  onLeave: null },
-    { id: 'repair',    icon: 'wrench',   render: renderUpcoming,  onLeave: null },
+    { id: 'repair',    icon: 'wrench',   render: renderRepair,    onLeave: null },
     { id: 'notebooks', icon: 'book',     render: renderUpcoming,  onLeave: null },
     { id: 'settings',  icon: 'settings', render: renderUpcoming,  onLeave: null },
     // Hidden — reachable from the dashboard alert when setup is needed.
@@ -474,6 +500,92 @@ async function wizardRunAll() {
     try { await window.go.main.App.RunSetupAll(); }
     catch (e) { /* surfaced per-step */ }
     paintWizard(document.getElementById('content'));
+}
+
+/* ---------- Repair tab ---------------------------------------------------- */
+const REPAIR_LOG_KEY = '__repair__';
+const REPAIR_ACTIONS = [
+    { id: 'repair_jupyter', titleKey: 'repair.jupyter.title', descKey: 'repair.jupyter.desc', destructive: false },
+    { id: 'reformat_hdfs',  titleKey: 'repair.hdfs.title',    descKey: 'repair.hdfs.desc',    destructive: true  },
+    { id: 'reformat_kafka', titleKey: 'repair.kafka.title',   descKey: 'repair.kafka.desc',   destructive: true  },
+    { id: 'clean',          titleKey: 'repair.clean.title',   descKey: 'repair.clean.desc',   destructive: true  },
+];
+
+async function renderRepair(root) {
+    document.getElementById('viewActions').innerHTML = '';
+
+    if (!STATE.logs[REPAIR_LOG_KEY]) {
+        try { STATE.logs[REPAIR_LOG_KEY] = await window.go.main.App.GetRepairLogs() || []; }
+        catch (e) { STATE.logs[REPAIR_LOG_KEY] = []; }
+    }
+    if (!STATE._repairSubscribed && window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn('service:repair:log', (line) => {
+            if (!STATE.logs[REPAIR_LOG_KEY]) STATE.logs[REPAIR_LOG_KEY] = [];
+            STATE.logs[REPAIR_LOG_KEY].push(line);
+            if (currentView === 'repair') appendRepairLine(line);
+        });
+        STATE._repairSubscribed = true;
+    }
+
+    const cards = REPAIR_ACTIONS.map(a => {
+        const danger = a.destructive ? 'c-card c-card--danger-outline' : 'c-card';
+        return '<div class="' + danger + '">' +
+            '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">' +
+                '<div>' +
+                    '<strong>' + esc(t(a.titleKey)) + '</strong>' +
+                    '<p style="margin: 6px 0 0; color:var(--color-text-muted); font-size: 13px;">' + esc(t(a.descKey)) + '</p>' +
+                '</div>' +
+                '<button class="c-btn ' + (a.destructive ? 'c-btn--danger' : 'c-btn--primary') + '" data-action="' + a.id + '" data-destructive="' + a.destructive + '">' +
+                    iconHTML('wrench') + ' ' + t('repair.run') +
+                '</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+
+    root.innerHTML =
+        '<div class="c-alert c-alert--warn">' + iconHTML('alert') + '<div>' + t('repair.intro') + '</div></div>' +
+        '<div class="c-card-grid" style="margin-bottom: var(--s-5);">' + cards + '</div>' +
+        '<div class="c-console" style="height: 320px;">' +
+            '<div class="c-console__toolbar"><strong style="color:var(--color-text-muted);">Salida de las acciones de reparación</strong></div>' +
+            '<pre class="c-console__pane" id="repairPane"></pre>' +
+        '</div>';
+
+    root.querySelectorAll('button[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => runRepairAction(btn.dataset.action, btn.dataset.destructive === 'true'));
+    });
+
+    paintRepairLog();
+}
+
+async function runRepairAction(action, destructive) {
+    if (destructive) {
+        const kw = t('repair.confirmKeyword');
+        const v = prompt(t('repair.confirmPrompt', kw));
+        if (v !== kw) {
+            alert(t('repair.cancelled'));
+            return;
+        }
+    } else {
+        if (!confirm(t('repair.run') + ' "' + action + '"?')) return;
+    }
+    try { await window.go.main.App.RunRepair(action); }
+    catch (e) { alert('Error: ' + e); }
+}
+
+function paintRepairLog() {
+    const pane = document.getElementById('repairPane');
+    if (!pane) return;
+    const lines = STATE.logs[REPAIR_LOG_KEY] || [];
+    if (!lines.length) { pane.innerHTML = '<span style="color:var(--color-text-muted);">(sin salida aún)</span>'; return; }
+    pane.innerHTML = lines.map(formatLineHTML).join('\n');
+    pane.scrollTop = pane.scrollHeight;
+}
+function appendRepairLine(line) {
+    const pane = document.getElementById('repairPane');
+    if (!pane) return;
+    if (pane.children.length === 1 && !pane.children[0].classList) pane.innerHTML = '';
+    pane.insertAdjacentHTML('beforeend', formatLineHTML(line) + '\n');
+    pane.scrollTop = pane.scrollHeight;
 }
 
 /* ---------- Services tab -------------------------------------------------- */

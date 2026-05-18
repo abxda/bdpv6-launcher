@@ -12,6 +12,7 @@ import (
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
 	"github.com/abxda/bdpv6-launcher/internal/ports"
+	"github.com/abxda/bdpv6-launcher/internal/repair"
 	"github.com/abxda/bdpv6-launcher/internal/services"
 	"github.com/abxda/bdpv6-launcher/internal/setup"
 	"github.com/abxda/bdpv6-launcher/internal/state"
@@ -27,8 +28,10 @@ type App struct {
 	state    *state.Store
 	registry *services.Registry
 
-	setupSink *logsink.Sink
-	setup     *setup.Orchestrator
+	setupSink  *logsink.Sink
+	setup      *setup.Orchestrator
+	repairSink *logsink.Sink
+	repair     *repair.Repairer
 
 	logSubsMu sync.Mutex
 	logSubs   map[string]int // service id → logsink sub id, so we can detach on shutdown
@@ -40,13 +43,17 @@ func NewApp() *App {
 	p := paths.Detect()
 	st := state.NewStore(p.StateFile)
 	setupSink := logsink.New("setup", p.Logs, 2000)
+	repairSink := logsink.New("repair", p.Logs, 2000)
+	setupOrc := setup.New(p, st, setupSink)
 	a := &App{
-		paths:     p,
-		state:     st,
-		registry:  services.NewRegistry(),
-		setupSink: setupSink,
-		setup:     setup.New(p, st, setupSink),
-		logSubs:   map[string]int{},
+		paths:      p,
+		state:      st,
+		registry:   services.NewRegistry(),
+		setupSink:  setupSink,
+		setup:      setupOrc,
+		repairSink: repairSink,
+		repair:     repair.New(p, st, repairSink, setupOrc),
+		logSubs:    map[string]int{},
 	}
 	return a
 }
@@ -134,6 +141,14 @@ func (a *App) attachLogStreams() {
 		go func() {
 			for line := range ch {
 				wailsruntime.EventsEmit(a.ctx, "service:setup:log", line)
+			}
+		}()
+	}
+	if a.repairSink != nil {
+		_, ch := a.repairSink.Subscribe()
+		go func() {
+			for line := range ch {
+				wailsruntime.EventsEmit(a.ctx, "service:repair:log", line)
 			}
 		}()
 	}
@@ -366,4 +381,28 @@ func (a *App) GetSetupLogs() []logsink.Line {
 		return nil
 	}
 	return a.setupSink.Snapshot()
+}
+
+// --- repair actions --------------------------------------------------------
+
+// RepairAction identifies an action by name. Defined as constants so the
+// frontend code does not have to know the string values.
+type RepairAction = repair.Action
+
+// RunRepair invokes one of the destructive maintenance actions. Streams via
+// the service:repair:log event. The caller (frontend) is responsible for
+// obtaining explicit user confirmation before invoking.
+func (a *App) RunRepair(action string) error {
+	if action == "" {
+		return fmt.Errorf("acción vacía")
+	}
+	return a.repair.Run(a.ctx, repair.Action(action))
+}
+
+// GetRepairLogs returns the ring buffer snapshot from the repair sink.
+func (a *App) GetRepairLogs() []logsink.Line {
+	if a.repairSink == nil {
+		return nil
+	}
+	return a.repairSink.Snapshot()
 }
