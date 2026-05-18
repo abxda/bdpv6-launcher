@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>BDPV6 Launcher</title>
+    <link rel="stylesheet" href="/style.css"/>
+</head>
+<body>
+<div class="app-shell">
+    <aside class="c-sidebar" id="sidebar">
+        <div class="c-sidebar__brand">
+            <span class="c-sidebar__logo" data-icon="cpu"></span>
+            <div>
+                <div class="c-sidebar__title">BDPV6</div>
+                <div class="c-sidebar__subtitle" data-i18n="brand.subtitle">Launcher</div>
+            </div>
+        </div>
+        <nav class="c-sidebar__nav" id="nav"></nav>
+        <div class="c-sidebar__footer" id="versionInfo"></div>
+    </aside>
+    <main class="c-main" id="main">
+        <header class="c-header">
+            <h1 class="c-header__title" id="viewTitle"></h1>
+            <div class="c-header__actions" id="viewActions"></div>
+        </header>
+        <section class="c-content" id="content"></section>
+    </main>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

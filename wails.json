@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "BDPV6 Launcher",
+  "outputfilename": "bdpv6-launcher",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "wailsjsdir": "./frontend",
+  "author": {
+    "name": "Abel Coronado",
+    "email": "37155702+abxda@users.noreply.github.com"
+  },
+  "info": {
+    "companyName": "BDP",
+    "productName": "BDPV6 Launcher",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright (c) 2026 Abel Coronado",
+    "comments": "Cross-platform launcher (Wails v2) for the Big Data Portable distribution (HDFS + Kafka + Elasticsearch + Jupyter)."
+  }
+}

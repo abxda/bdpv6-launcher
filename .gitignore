@@ -1,0 +1,31 @@
+# Wails build artefacts
+build/bin/
+
+# Wails Windows NSIS support files
+build/windows/installer/wails_tools.nsh
+build/windows/installer/tmp/
+
+# Wails generated bindings (rebuilt by wails dev / wails build)
+frontend/wailsjs/
+
+# Per-machine launcher state (do not commit user preferences)
+.bdp_state.json
+
+# IDEs
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Go
+*.test
+*.out
+*.exe
+*.exe~
+vendor/
+
+# Node (just in case anyone adds tools)
+node_modules/
