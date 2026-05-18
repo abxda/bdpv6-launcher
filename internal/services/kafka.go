@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,6 +15,15 @@ import (
 
 // Kafka wraps the bundled Kafka KRaft single-node cluster. Port refers to
 // the broker listener; the controller port is broker+1 by convention.
+//
+// IMPORTANT: we bypass the bundled kafka-server-start.bat wrapper entirely
+// and invoke `java` directly. The .bat file builds a CLASSPATH by listing
+// every jar in kafka_kraft/libs/* and pastes it onto the command line via
+// `java -cp "<6900 chars>" …`. On Windows that overflows the 8191-char
+// cmd.exe limit and the bat dies with "La sintaxis del comando no es
+// correcta." before Java even starts. Calling java with the wildcard
+// classpath `libs/*` keeps the command line short and works on both
+// Windows and macOS without depending on the OS-specific wrappers.
 type Kafka struct {
 	p    *paths.Paths
 	port int
@@ -51,15 +61,32 @@ func (k *Kafka) Start(ctx context.Context) error {
 		return nil
 	}
 
-	env := javaEnv(k.p)
-	if k.heap != "" {
-		env["KAFKA_HEAP_OPTS"] = fmt.Sprintf("-Xms%s -Xmx%s", k.heap, k.heap)
+	heap := k.heap
+	if heap == "" {
+		heap = "512m"
 	}
 
-	k.sink.Emit("INFO", fmt.Sprintf("Lanzando Kafka KRaft en puerto %d", k.port))
+	classpath := KafkaWildcardClasspath(k.p)
+	log4j := filepath.Join(k.p.Kafka, "config", "log4j.properties")
+
+	args := []string{
+		"-Xms" + heap, "-Xmx" + heap,
+		"-server",
+		"-XX:+UseG1GC",
+		"-XX:MaxGCPauseMillis=20",
+		"-Dlog4j.configuration=file:" + filepath.ToSlash(log4j),
+		"-Dkafka.logs.dir=" + filepath.ToSlash(filepath.Join(k.p.Logs, "kafka")),
+		"-classpath", classpath,
+		"kafka.Kafka",
+		k.p.KafkaConfig(),
+	}
+
+	env := javaEnv(k.p)
+
+	k.sink.Emit("INFO", fmt.Sprintf("Lanzando Kafka KRaft en puerto %d (heap %s)", k.port, heap))
 	spec := processctl.Spec{
-		Command: k.p.KafkaStartCommand(),
-		Args:    []string{k.p.KafkaConfig()},
+		Command: k.p.JavaBinary(),
+		Args:    args,
 		Env:     env,
 		Cwd:     k.p.Kafka,
 		Out:     sinkWriter{s: k.sink},
@@ -113,4 +140,11 @@ func (k *Kafka) Status() Status {
 		st.Detail = "detenido"
 	}
 	return st
+}
+
+// KafkaWildcardClasspath returns "<kafka>/libs/*" which Java expands at
+// startup to every jar in the folder. Exported so the setup package can
+// reuse it for kafka-storage format without duplicating logic.
+func KafkaWildcardClasspath(p *paths.Paths) string {
+	return filepath.Join(p.Kafka, "libs", "*")
 }

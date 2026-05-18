@@ -556,7 +556,11 @@ async function paintWizard(root) {
         '<div class="c-alert c-alert--info">' + iconHTML('info') + '<div>' + t('wizard.intro') + '</div></div>' +
         '<div class="c-card-grid" style="margin-bottom: var(--s-5);">' + stepCards + '</div>' +
         '<div class="c-console" style="height: 320px;">' +
-            '<div class="c-console__toolbar"><strong style="color:var(--color-text-muted);">Salida del asistente</strong></div>' +
+            '<div class="c-console__toolbar">' +
+                '<strong style="flex:1; color:var(--color-text-muted);">Salida del asistente</strong>' +
+                '<button class="c-btn" id="wizCopyBtn">' + iconHTML('copy') + ' ' + t('consoles.copy') + '</button>' +
+                '<button class="c-btn" id="wizClearBtn">' + iconHTML('trash') + ' ' + t('consoles.clear') + '</button>' +
+            '</div>' +
             '<pre class="c-console__pane" id="wizardPane"></pre>' +
         '</div>';
 
@@ -567,6 +571,8 @@ async function paintWizard(root) {
             paintWizard(root);
         });
     });
+    document.getElementById('wizCopyBtn').addEventListener('click', () => copyLines(STATE.logs[SETUP_LOG_KEY] || []));
+    document.getElementById('wizClearBtn').addEventListener('click', () => { STATE.logs[SETUP_LOG_KEY] = []; paintWizardLog(); });
 
     paintWizardLog();
 }
@@ -827,13 +833,19 @@ async function renderRepair(root) {
         '<div class="c-alert c-alert--warn">' + iconHTML('alert') + '<div>' + t('repair.intro') + '</div></div>' +
         '<div class="c-card-grid" style="margin-bottom: var(--s-5);">' + cards + '</div>' +
         '<div class="c-console" style="height: 320px;">' +
-            '<div class="c-console__toolbar"><strong style="color:var(--color-text-muted);">Salida de las acciones de reparación</strong></div>' +
+            '<div class="c-console__toolbar">' +
+                '<strong style="flex:1; color:var(--color-text-muted);">Salida de las acciones de reparación</strong>' +
+                '<button class="c-btn" id="repCopyBtn">' + iconHTML('copy') + ' ' + t('consoles.copy') + '</button>' +
+                '<button class="c-btn" id="repClearBtn">' + iconHTML('trash') + ' ' + t('consoles.clear') + '</button>' +
+            '</div>' +
             '<pre class="c-console__pane" id="repairPane"></pre>' +
         '</div>';
 
     root.querySelectorAll('button[data-action]').forEach(btn => {
         btn.addEventListener('click', () => runRepairAction(btn.dataset.action, btn.dataset.destructive === 'true'));
     });
+    document.getElementById('repCopyBtn').addEventListener('click', () => copyLines(STATE.logs[REPAIR_LOG_KEY] || []));
+    document.getElementById('repClearBtn').addEventListener('click', () => { STATE.logs[REPAIR_LOG_KEY] = []; paintRepairLog(); });
 
     paintRepairLog();
 }
@@ -1113,10 +1125,21 @@ function clearActiveConsole() {
     STATE.logs[STATE.activeConsole] = [];
     renderConsolePane();
 }
-function copyActiveConsole() {
-    const lines = STATE.logs[STATE.activeConsole] || [];
+function copyActiveConsole() { copyLines(STATE.logs[STATE.activeConsole] || []); }
+
+// Generic helpers shared by every console (services, wizard, repair).
+function copyLines(lines) {
     const text = lines.map(l => new Date(l.t).toISOString().slice(11, 23) + ' ' + (l.l || 'INFO') + ' ' + l.x).join('\n');
-    navigator.clipboard && navigator.clipboard.writeText(text);
+    if (!navigator.clipboard) {
+        // Fallback for older WebView2 / strict mode contexts.
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        return;
+    }
+    navigator.clipboard.writeText(text).catch(() => { /* user dismissed permissions */ });
 }
 
 /* ---------- helpers ------------------------------------------------------- */
