@@ -87,7 +87,14 @@ func (a *App) bootstrapServices() {
 		}
 		return ""
 	}
+	// Registration order matters for StopAll: services are stopped in
+	// reverse order, so Jupyter goes down first (clean notebook sessions)
+	// and HDFS NameNode last (so DataNode can flush blocks first).
+	a.registry.Register(services.NewHDFSNameNode(a.paths, port("hdfs_namenode", 9870)))
+	a.registry.Register(services.NewHDFSDataNode(a.paths, port("hdfs_datanode", 9864)))
+	a.registry.Register(services.NewKafka(a.paths, port("kafka", 9092), heap("kafka")))
 	a.registry.Register(services.NewElasticsearch(a.paths, port("elasticsearch", 9200), heap("elasticsearch")))
+	a.registry.Register(services.NewJupyter(a.paths, port("jupyter", 8888)))
 }
 
 // attachLogStreams subscribes the App to every registered Sink and forwards
@@ -223,4 +230,25 @@ func (a *App) ClearServiceLogs(id string) {
 	if svc, ok := a.registry.Get(id); ok && svc.Logs() != nil {
 		svc.Logs().Clear()
 	}
+}
+
+// JupyterURL returns the captured token-bearing URL (empty if Jupyter has
+// not printed it yet or is not running).
+func (a *App) JupyterURL() string {
+	if svc, ok := a.registry.Get("jupyter"); ok {
+		if j, ok := svc.(*services.Jupyter); ok {
+			return j.URL()
+		}
+	}
+	return ""
+}
+
+// OpenJupyter asks the OS to open the captured Jupyter URL in the default
+// browser. No-op if the URL is not yet known.
+func (a *App) OpenJupyter() {
+	url := a.JupyterURL()
+	if url == "" {
+		return
+	}
+	wailsruntime.BrowserOpenURL(a.ctx, url)
 }
