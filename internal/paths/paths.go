@@ -37,7 +37,7 @@ func Detect() *Paths {
 	dir := executableDir()
 	return &Paths{
 		ScriptDir:  dir,
-		CommonJDK:  filepath.Join(dir, "common_jdk"),
+		CommonJDK:  detectJavaHome(filepath.Join(dir, "common_jdk")),
 		Hadoop:     filepath.Join(dir, "hadoop"),
 		HadoopConf: filepath.Join(dir, "hadoop", "etc", "hadoop"),
 		Kafka:      filepath.Join(dir, "kafka_kraft"),
@@ -49,6 +49,28 @@ func Detect() *Paths {
 		Logs:       filepath.Join(dir, "logs"),
 		StateFile:  filepath.Join(dir, ".bdp_state.json"),
 	}
+}
+
+// detectJavaHome resolves the actual JAVA_HOME inside common_jdk/. On
+// Windows / Linux the layout is flat (common_jdk/bin/java). On macOS,
+// JDK distributions ship as bundles: common_jdk/<name>.jdk/Contents/Home/
+// is the real JAVA_HOME, and bin/java lives one level deeper. Without
+// this unwrap, every service that needs Java fails on Mac because
+// JAVA_HOME points at the wrapper dir and bin/java isn't found.
+func detectJavaHome(commonJDK string) string {
+	if _, err := os.Stat(filepath.Join(commonJDK, "bin", "java")); err == nil {
+		return commonJDK
+	}
+	if runtime.GOOS == "windows" {
+		if _, err := os.Stat(filepath.Join(commonJDK, "bin", "java.exe")); err == nil {
+			return commonJDK
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(commonJDK, "*.jdk", "Contents", "Home"))
+	if len(matches) > 0 {
+		return matches[0]
+	}
+	return commonJDK // best effort; Validate will surface the failure
 }
 
 // Validate reports whether the expected service folders exist next to the

@@ -99,9 +99,9 @@ func wordCountExercise(p *paths.Paths, id, name, dir string, files []string) *Ex
 		},
 		{
 			Title: "6 · Top-20 palabras más frecuentes",
-			Notes: "Leemos la salida del reducer (part-00000), ordenamos por la columna 2 numérica descendente, y mostramos los 20 primeros tokens. Llamamos a `hdfs.cmd` con extensión .cmd porque bash en MSYS, al buscar 'hdfs' en PATH, prefiere el script shell `hdfs` (sin extensión, pensado para Linux) sobre `hdfs.cmd` (Windows). El script Linux construye la CLASSPATH con convenciones Unix y falla con ClassNotFoundException en Windows.",
+			Notes: top20Notes(),
 			Cmd:   bashBin,
-			Args:  []string{"-lc", "hdfs.cmd dfs -cat " + hdfsOutput + "/part-00000 | sort -t$'\\t' -k2 -nr | head -20"},
+			Args:  []string{"-lc", hdfsBinForBash() + " dfs -cat " + hdfsOutput + "/part-00000 | sort -t$'\\t' -k2 -nr | head -20"},
 			Shell: true,
 			PrintAs: "hdfs dfs -cat " + hdfsOutput + "/part-00000 \\\n" +
 				"  | sort -t$'\\t' -k2 -nr | head -20",
@@ -138,6 +138,29 @@ func hadoopScript() string {
 		return "hadoop.cmd"
 	}
 	return "hadoop"
+}
+
+// hdfsBinForBash returns the hdfs wrapper name to invoke from inside the
+// bash subshell of step 6. On Windows we MUST say `hdfs.cmd` explicitly
+// because MSYS bash's PATH lookup prefers the extensionless Linux shell
+// script `hdfs` over `hdfs.cmd`, and that Linux script builds its
+// classpath with Unix conventions, failing with ClassNotFoundException
+// on Windows. On Mac / Linux the extensionless `hdfs` is the right one.
+func hdfsBinForBash() string {
+	if isWindows() {
+		return "hdfs.cmd"
+	}
+	return "hdfs"
+}
+
+// top20Notes returns the teacher's explanation for step 6, with the
+// Windows-specific .cmd caveat only shown on Windows.
+func top20Notes() string {
+	base := "Leemos la salida del reducer (part-00000), ordenamos por la columna 2 numérica descendente, y mostramos los 20 primeros tokens. "
+	if isWindows() {
+		return base + "Llamamos a `hdfs.cmd` con extensión .cmd porque bash en MSYS, al buscar 'hdfs' en PATH, prefiere el script shell `hdfs` (sin extensión, pensado para Linux) sobre `hdfs.cmd` (Windows). El script Linux construye la CLASSPATH con convenciones Unix y falla con ClassNotFoundException en Windows."
+	}
+	return base + "Encadenamos comandos Unix estándar (sort -k2 -nr | head -20) sobre el part-00000 del job."
 }
 
 // toFileURI turns an absolute local filesystem path into a file:/// URI

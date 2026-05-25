@@ -46,3 +46,9 @@ func mergePath(prepend []string) string {
 	}
 	return strings.Join(parts, sep)
 }
+
+// toForwardSlash gives a path-style bash understands cleanly inside
+// string literals. On Windows it converts \ to / (mintty/git-bash
+// accepts either /d/foo or D:/foo); on Mac/Linux it's a no-op since
+// paths are already forward-slashed.
+func toForwardSlash(p string) string { return strings.ReplaceAll(p, `\`, `/`) }

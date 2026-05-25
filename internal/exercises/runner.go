@@ -196,8 +196,9 @@ func (r *Runner) buildEnv() []string {
 	pathDirs := []string{
 		filepath.Join(r.p.CommonJDK, "bin"),
 		filepath.Join(r.p.Hadoop, "bin"),
-		r.p.Python,
-		filepath.Join(r.p.Python, "Scripts"),
+		r.p.Python,                              // Windows: where python.exe lives
+		filepath.Join(r.p.Python, "Scripts"),    // Windows: pip / jupyterlab.exe
+		filepath.Join(r.p.Python, "bin"),        // Mac / Linux: python3 + pip3
 	}
 	overrides["PATH"] = mergePath(pathDirs)
 	return mergeOSEnv(overrides)
