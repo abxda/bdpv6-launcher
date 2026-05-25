@@ -24,8 +24,40 @@ type Runner struct {
 	p    *paths.Paths
 	sink *logsink.Sink
 
-	mu      sync.Mutex
-	running bool
+	mu        sync.Mutex
+	running   bool
+	cancel    context.CancelFunc // non-nil while a step is executing
+	onStateCh func(running bool) // optional callback fired when running flips
+}
+
+// OnStateChange registers a callback invoked every time the running flag
+// flips (true on Start, false on completion or Stop). Used by App to
+// emit Wails events so the UI can swap Run/Stop buttons reactively.
+func (r *Runner) OnStateChange(fn func(running bool)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onStateCh = fn
+}
+
+// Stop cancels the currently-running step (if any). The context cancel
+// causes exec.CommandContext to kill the process tree. Safe to call when
+// nothing is running — it just no-ops.
+func (r *Runner) Stop() {
+	r.mu.Lock()
+	cancel := r.cancel
+	r.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	r.sink.Emit("WARN", "⏹ Detención solicitada por el usuario; matando el proceso…")
+	cancel()
+}
+
+// Running reports whether a step is currently executing.
+func (r *Runner) Running() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.running
 }
 
 func NewRunner(ex Exercise, p *paths.Paths, sink *logsink.Sink) *Runner {
@@ -35,18 +67,10 @@ func NewRunner(ex Exercise, p *paths.Paths, sink *logsink.Sink) *Runner {
 // RunStep executes one step (0-indexed) and returns when the process
 // exits or the context is cancelled.
 func (r *Runner) RunStep(ctx context.Context, idx int) error {
-	r.mu.Lock()
-	if r.running {
-		r.mu.Unlock()
-		return errors.New("ya hay un paso ejecutándose; espera a que termine")
+	if err := r.markRunning(); err != nil {
+		return err
 	}
-	r.running = true
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		r.running = false
-		r.mu.Unlock()
-	}()
+	defer r.markIdle()
 
 	if idx < 0 || idx >= len(r.ex.Steps) {
 		return fmt.Errorf("paso fuera de rango: %d", idx)
@@ -56,18 +80,10 @@ func (r *Runner) RunStep(ctx context.Context, idx int) error {
 
 // RunAll executes every step in sequence, stopping on the first failure.
 func (r *Runner) RunAll(ctx context.Context) error {
-	r.mu.Lock()
-	if r.running {
-		r.mu.Unlock()
-		return errors.New("ya hay un paso ejecutándose; espera a que termine")
+	if err := r.markRunning(); err != nil {
+		return err
 	}
-	r.running = true
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		r.running = false
-		r.mu.Unlock()
-	}()
+	defer r.markIdle()
 
 	total := len(r.ex.Steps)
 	for i, s := range r.ex.Steps {
@@ -78,6 +94,32 @@ func (r *Runner) RunAll(ctx context.Context) error {
 	}
 	r.sink.Emit("INFO", "✓ Ejercicio completado.")
 	return nil
+}
+
+func (r *Runner) markRunning() error {
+	r.mu.Lock()
+	if r.running {
+		r.mu.Unlock()
+		return errors.New("ya hay un paso ejecutándose; espera a que termine o pulsa Detener")
+	}
+	r.running = true
+	cb := r.onStateCh
+	r.mu.Unlock()
+	if cb != nil {
+		cb(true)
+	}
+	return nil
+}
+
+func (r *Runner) markIdle() {
+	r.mu.Lock()
+	r.running = false
+	r.cancel = nil
+	cb := r.onStateCh
+	r.mu.Unlock()
+	if cb != nil {
+		cb(false)
+	}
 }
 
 func (r *Runner) execStep(ctx context.Context, s Step, num, total int) error {
@@ -98,7 +140,14 @@ func (r *Runner) execStep(ctx context.Context, s Step, num, total int) error {
 		return errors.New("este paso requiere bash y no encontré bash en la distro (esperado en bash/usr/bin/bash.exe)")
 	}
 
-	stepCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// Combine the parent context with our cancellable wrapper so Stop()
+	// can kill the process tree on demand. 15-minute hard ceiling so a
+	// truly stuck step still eventually returns; the user can also press
+	// Stop manually long before that.
+	stepCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
 	defer cancel()
 
 	cmd := exec.CommandContext(stepCtx, s.Cmd, s.Args...)

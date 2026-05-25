@@ -125,6 +125,12 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 // GracefulPreStop (if implemented) + Stop, and finally calls Quit to let
 // the window close.
 func (a *App) runGracefulShutdown() {
+	// First: cancel any in-flight exercise step. They're user code (not
+	// our services) so we kill them outright rather than wait — students
+	// don't want to wait 15 min for a stuck YARN retry loop to give up
+	// when they close the launcher.
+	a.stopAllExercises()
+
 	wailsruntime.EventsEmit(a.ctx, "shutdown:start", map[string]any{
 		"total": len(a.registry.All()),
 	})
@@ -571,7 +577,8 @@ func (a *App) ListExercises() []exercises.Exercise {
 
 // sessionFor lazily builds (or returns the cached) per-exercise session.
 // First call also starts the goroutine that forwards sink lines to the
-// "exercise:<id>:log" Wails event.
+// "exercise:<id>:log" Wails event and registers an OnStateChange so the
+// UI knows when to swap Run/Stop buttons.
 func (a *App) sessionFor(id string) *exerciseSession {
 	a.exMu.Lock()
 	defer a.exMu.Unlock()
@@ -593,21 +600,25 @@ func (a *App) sessionFor(id string) *exerciseSession {
 		return nil
 	}
 	sink := logsink.New("ex-"+id, a.paths.Logs, 4000)
-	s := &exerciseSession{
-		ex:     *ex,
-		sink:   sink,
-		runner: exercises.NewRunner(*ex, a.paths, sink),
-	}
+	runner := exercises.NewRunner(*ex, a.paths, sink)
+	s := &exerciseSession{ex: *ex, sink: sink, runner: runner}
 	a.exerciseRunners[id] = s
 
 	// One subscription per session, forwards every line as an event.
 	_, ch := sink.Subscribe()
-	eventName := "exercise:" + id + ":log"
+	logEvent := "exercise:" + id + ":log"
 	go func() {
 		for line := range ch {
-			wailsruntime.EventsEmit(a.ctx, eventName, line)
+			wailsruntime.EventsEmit(a.ctx, logEvent, line)
 		}
 	}()
+
+	// State change → fires "exercise:<id>:state" with {running: bool}
+	// so the UI can swap the [▶ Run] / [⏹ Stop] buttons.
+	stateEvent := "exercise:" + id + ":state"
+	runner.OnStateChange(func(running bool) {
+		wailsruntime.EventsEmit(a.ctx, stateEvent, map[string]any{"running": running})
+	})
 	return s
 }
 
@@ -643,6 +654,38 @@ func (a *App) GetExerciseLogs(exerciseID string) []logsink.Line {
 func (a *App) ClearExerciseLogs(exerciseID string) {
 	if s := a.sessionFor(exerciseID); s != nil {
 		s.sink.Clear()
+	}
+}
+
+// StopExerciseStep cancels whatever step is currently running for the
+// given exercise. No-op if nothing is running.
+func (a *App) StopExerciseStep(exerciseID string) {
+	if s := a.sessionFor(exerciseID); s != nil {
+		s.runner.Stop()
+	}
+}
+
+// IsExerciseRunning lets the UI initialise the Run/Stop button state on
+// view enter (the state event covers subsequent changes).
+func (a *App) IsExerciseRunning(exerciseID string) bool {
+	s := a.sessionFor(exerciseID)
+	if s == nil {
+		return false
+	}
+	return s.runner.Running()
+}
+
+// stopAllExercises is called during graceful shutdown so a long-running
+// or hung step does not block the launcher window from closing.
+func (a *App) stopAllExercises() {
+	a.exMu.Lock()
+	sessions := make([]*exerciseSession, 0, len(a.exerciseRunners))
+	for _, s := range a.exerciseRunners {
+		sessions = append(sessions, s)
+	}
+	a.exMu.Unlock()
+	for _, s := range sessions {
+		s.runner.Stop()
 	}
 }
 

@@ -65,16 +65,22 @@ func wordCountExercise(p *paths.Paths, id, name, dir string, files []string) *Ex
 		},
 		{
 			Title: "4 · Ejecutar el job MapReduce vía Hadoop Streaming",
-			Notes: "Hadoop Streaming envía cada línea del input al stdin del mapper, y el stdout del mapper al stdin del reducer. En modo single-node (lo que tenemos) el 'worker' que corre el mapper es la misma máquina que hizo submit, así que basta con pasarle la ruta absoluta de los scripts a -mapper / -reducer; en cluster real usaríamos -files para distribuirlos.",
+			Notes: "Hadoop Streaming envía cada línea del input al stdin del mapper y el stdout del mapper al stdin del reducer. Forzamos -Dmapreduce.framework.name=local porque esta distribución NO incluye YARN (sin ResourceManager); el LocalJobRunner corre el job dentro del JVM del cliente — perfecto para didáctica single-node. En cluster real cambiarías a yarn y usarías -files para distribuir los scripts.",
 			Cmd:   filepath.Join(p.Hadoop, "bin", hadoopScript()),
 			Args: []string{
 				"jar", streamingJar,
+				// Generic options MUST come right after the jar name,
+				// BEFORE the streaming -mapper/-reducer/-input/-output.
+				"-Dmapreduce.framework.name=local",
+				"-Dmapreduce.jobtracker.address=local",
 				"-mapper", "python " + filepath.ToSlash(filepath.Join(dir, "mapper.py")),
 				"-reducer", "python " + filepath.ToSlash(filepath.Join(dir, "reducer.py")),
 				"-input", hdfsInput,
 				"-output", hdfsOutput,
 			},
 			PrintAs: "hadoop jar hadoop-streaming.jar \\\n" +
+				"  -Dmapreduce.framework.name=local \\\n" +
+				"  -Dmapreduce.jobtracker.address=local \\\n" +
 				"  -mapper  \"python " + filepath.ToSlash(filepath.Join(dir, "mapper.py")) + "\" \\\n" +
 				"  -reducer \"python " + filepath.ToSlash(filepath.Join(dir, "reducer.py")) + "\" \\\n" +
 				"  -input " + hdfsInput + " -output " + hdfsOutput,

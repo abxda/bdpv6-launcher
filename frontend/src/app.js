@@ -53,6 +53,9 @@ const STR = {
         'ex.openFolder':    'Abrir carpeta',
         'ex.runAll':        'Ejecutar todos los pasos',
         'ex.runStep':       'Ejecutar este paso',
+        'ex.stop':          'Detener',
+        'ex.stopping':      'Deteniendo…',
+        'ex.running':       'Ejecutando…',
         'ex.refresh':       'Re-descubrir',
         'ex.requires':      'Requiere:',
         'ex.files':         'Archivos:',
@@ -184,6 +187,9 @@ const STR = {
         'ex.openFolder':    'Open folder',
         'ex.runAll':        'Run all steps',
         'ex.runStep':       'Run this step',
+        'ex.stop':          'Stop',
+        'ex.stopping':      'Stopping…',
+        'ex.running':       'Running…',
         'ex.refresh':       'Re-discover',
         'ex.requires':      'Requires:',
         'ex.files':         'Files:',
@@ -873,6 +879,7 @@ async function renderNotebooks(root) {
 /* ---------- Exercises tab ------------------------------------------------- */
 let exerciseActive = null;       // id of the exercise currently shown in detail
 const exerciseLogSubs = {};      // id → true once we've EventsOn'd this exercise
+const exerciseRunningMap = {};   // id → bool, live updated via exercise:<id>:state
 
 async function renderExercises(root) {
     document.getElementById('viewActions').innerHTML =
@@ -917,25 +924,27 @@ function renderExerciseList(root) {
 }
 
 async function renderExerciseDetail(root, ex) {
-    // Header actions: back to list + run all.
-    document.getElementById('viewActions').innerHTML =
-        '<button class="c-btn" id="actExBack">' + iconHTML('layout') + ' ' + t('ex.back') + '</button>' +
-        '<button class="c-btn c-btn--primary" id="actExRunAll">' + iconHTML('play') + ' ' + t('ex.runAll') + '</button>';
-    document.getElementById('actExBack').addEventListener('click', () => {
-        exerciseActive = null;
-        renderExercises(root);
-    });
-    document.getElementById('actExRunAll').addEventListener('click', async () => {
-        try { await window.go.main.App.RunAllExerciseSteps(ex.id); }
-        catch (e) { alert('Error: ' + e); }
-    });
+    // Initial running state from the backend so the buttons render correctly
+    // on first paint (before any state event arrives).
+    let isRunning = false;
+    try { isRunning = !!(await window.go.main.App.IsExerciseRunning(ex.id)); } catch (e) {}
+    exerciseRunningMap[ex.id] = isRunning;
 
-    // Subscribe once per session to live log events.
+    renderExerciseHeader(root, ex);
+
+    // Subscribe once per session to live log + state events.
     if (!exerciseLogSubs[ex.id] && window.runtime && window.runtime.EventsOn) {
         window.runtime.EventsOn('exercise:' + ex.id + ':log', (line) => {
             if (!STATE.logs['ex:' + ex.id]) STATE.logs['ex:' + ex.id] = [];
             STATE.logs['ex:' + ex.id].push(line);
             if (currentView === 'exercises' && exerciseActive === ex.id) appendExerciseLine(line);
+        });
+        window.runtime.EventsOn('exercise:' + ex.id + ':state', (data) => {
+            exerciseRunningMap[ex.id] = !!(data && data.running);
+            if (currentView === 'exercises' && exerciseActive === ex.id) {
+                renderExerciseHeader(root, ex);          // refresh header buttons
+                refreshExerciseStepButtons();             // refresh per-step buttons
+            }
         });
         exerciseLogSubs[ex.id] = true;
     }
@@ -982,12 +991,7 @@ async function renderExerciseDetail(root, ex) {
             '<pre class="c-console__pane" id="exPane"></pre>' +
         '</div>';
 
-    root.querySelectorAll('button[data-step]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            try { await window.go.main.App.RunExerciseStep(ex.id, parseInt(btn.dataset.step, 10)); }
-            catch (e) { alert('Error: ' + e); }
-        });
-    });
+    wireExerciseStepButtons(ex);
     document.getElementById('exCopyBtn').addEventListener('click', () => copyLines(STATE.logs['ex:' + ex.id] || []));
     document.getElementById('exClearBtn').addEventListener('click', async () => {
         try { await window.go.main.App.ClearExerciseLogs(ex.id); } catch (e) {}
@@ -1001,6 +1005,72 @@ async function renderExerciseDetail(root, ex) {
         catch (e) { STATE.logs['ex:' + ex.id] = []; }
     }
     paintExerciseLog();
+}
+
+// renderExerciseHeader rewrites just the header viewActions so the
+// "Ejecutar todos / Detener" button can swap reactively when state
+// events arrive without re-rendering the full detail view.
+function renderExerciseHeader(root, ex) {
+    const running = exerciseRunningMap[ex.id] === true;
+    const mainBtn = running
+        ? '<button class="c-btn c-btn--danger" id="actExStop">' + iconHTML('stop') + ' ' + t('ex.stop') + '</button>'
+        : '<button class="c-btn c-btn--primary" id="actExRunAll">' + iconHTML('play') + ' ' + t('ex.runAll') + '</button>';
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actExBack">' + iconHTML('layout') + ' ' + t('ex.back') + '</button>' +
+        mainBtn;
+    document.getElementById('actExBack').addEventListener('click', () => {
+        exerciseActive = null;
+        renderExercises(root);
+    });
+    const stopBtn = document.getElementById('actExStop');
+    const runBtn = document.getElementById('actExRunAll');
+    if (stopBtn) stopBtn.addEventListener('click', () => {
+        try { window.go.main.App.StopExerciseStep(ex.id); } catch (e) { alert('Error: ' + e); }
+    });
+    if (runBtn) runBtn.addEventListener('click', async () => {
+        try { await window.go.main.App.RunAllExerciseSteps(ex.id); }
+        catch (e) { alert('Error: ' + e); }
+    });
+}
+
+// wireExerciseStepButtons binds click handlers on the per-step buttons
+// based on the current exerciseRunningMap state. Called on initial paint
+// + every state change.
+function wireExerciseStepButtons(ex) {
+    refreshExerciseStepButtons();
+    document.querySelectorAll('button[data-step]').forEach(btn => {
+        // Replace any existing listener by cloning the node.
+        const fresh = btn.cloneNode(true);
+        btn.parentNode.replaceChild(fresh, btn);
+        const running = exerciseRunningMap[ex.id] === true;
+        fresh.addEventListener('click', async () => {
+            if (running) {
+                try { window.go.main.App.StopExerciseStep(ex.id); } catch (e) { alert(e); }
+            } else {
+                try { await window.go.main.App.RunExerciseStep(ex.id, parseInt(fresh.dataset.step, 10)); }
+                catch (e) { alert('Error: ' + e); }
+            }
+        });
+    });
+}
+
+// refreshExerciseStepButtons swaps the per-step button label/icon between
+// Run and Stop without rebuilding the whole step list.
+function refreshExerciseStepButtons() {
+    const id = exerciseActive;
+    if (!id) return;
+    const running = exerciseRunningMap[id] === true;
+    document.querySelectorAll('button[data-step]').forEach(btn => {
+        if (running) {
+            btn.className = 'c-btn c-btn--danger';
+            btn.innerHTML = iconHTML('stop') + ' ' + t('ex.stop');
+            btn.disabled = false;
+        } else {
+            btn.className = 'c-btn c-btn--primary';
+            btn.innerHTML = iconHTML('play') + ' ' + t('ex.runStep');
+            btn.disabled = false;
+        }
+    });
 }
 
 function paintExerciseLog() {
