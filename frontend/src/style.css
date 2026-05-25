@@ -76,6 +76,17 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* Inline SVG icons default to text-line size unless a component sizes them
+ * explicitly. Without this, an SVG with viewBox="0 0 24 24" but no width/
+ * height attributes will expand to the parent's intrinsic size — which made
+ * the Notebooks tab icons render at ~150px tall before. */
+svg {
+    width: 1em;
+    height: 1em;
+    vertical-align: -0.125em; /* aligns with text baseline */
+    flex-shrink: 0;
+}
+
 /* App shell */
 .app-shell {
     display: grid;
@@ -231,6 +242,7 @@ body {
     padding: var(--s-10);
     font-size: var(--fs-sm);
 }
+.c-placeholder svg { width: 28px; height: 28px; opacity: 0.6; }
 
 /* Tables */
 .c-table {

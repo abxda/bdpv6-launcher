@@ -20,12 +20,22 @@ import (
 // randomTestUUID returns a fresh 22-char base64url cluster id per run, so
 // tests against a real BDP distribution do not bake a fixed "TestE2E_*"
 // string into the user's Kafka metadata.
+//
+// First char is guaranteed alphanumeric: kafka-storage's argparse treats
+// values starting with "-" or "_" as new flags, not as the value of -t.
 func randomTestUUID(t *testing.T) string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		t.Fatalf("rand.Read: %v", err)
+	for i := 0; i < 8; i++ {
+		var b [16]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			t.Fatalf("rand.Read: %v", err)
+		}
+		s := strings.TrimRight(base64.URLEncoding.EncodeToString(b[:]), "=")
+		if len(s) > 0 && s[0] != '-' && s[0] != '_' {
+			return s
+		}
 	}
-	return strings.TrimRight(base64.URLEncoding.EncodeToString(b[:]), "=")
+	t.Fatalf("could not generate a safe UUID after 8 tries")
+	return ""
 }
 
 // TestE2E_KafkaFormat regression-tests the bypass of kafka-storage.bat.

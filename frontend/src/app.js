@@ -46,6 +46,7 @@ const STR = {
         'nav.repair':       'Reparar',
         'nav.notebooks':    'Notebooks',
         'nav.settings':     'Configuración',
+        'nav.wizard':       'Asistente',
         'view.dashboard.title':   'Dashboard',
         'view.services.title':    'Servicios',
         'view.ports.title':       'Puertos',
@@ -162,6 +163,7 @@ const STR = {
         'nav.repair':       'Repair',
         'nav.notebooks':    'Notebooks',
         'nav.settings':     'Settings',
+        'nav.wizard':       'Wizard',
         'view.dashboard.title':   'Dashboard',
         'view.services.title':    'Services',
         'view.ports.title':       'Ports',
@@ -291,6 +293,7 @@ const STATE = {
 /* ---------- View registry ------------------------------------------------- */
 const VIEWS = [
     { id: 'dashboard', icon: 'layout',   render: renderDashboard, onLeave: null },
+    { id: 'wizard',    icon: 'cpu',      render: renderWizard,    onLeave: null },
     { id: 'services',  icon: 'server',   render: renderServices,  onLeave: null },
     { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh },
     { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null },
@@ -298,8 +301,6 @@ const VIEWS = [
     { id: 'repair',    icon: 'wrench',   render: renderRepair,    onLeave: null },
     { id: 'notebooks', icon: 'book',     render: renderNotebooks, onLeave: null },
     { id: 'settings',  icon: 'settings', render: renderSettings,  onLeave: null },
-    // Hidden — reachable from the dashboard alert when setup is needed.
-    { id: 'wizard',    icon: 'wrench',   render: renderWizard,    onLeave: null, hidden: true },
 ];
 
 let currentView = 'dashboard';
@@ -386,6 +387,13 @@ function renderNav() {
     }
 }
 
+function refreshNavHighlight() {
+    const visible = VIEWS.filter(v => !v.hidden);
+    document.querySelectorAll('.c-sidebar__nav-item').forEach((el, i) => {
+        el.classList.toggle('is-active', visible[i] && visible[i].id === currentView);
+    });
+}
+
 function renderVersionFooter() {
     const el = document.getElementById('versionInfo');
     if (STATE.envInfo && STATE.envInfo.appVersion) {
@@ -401,11 +409,7 @@ function renderView(id) {
     document.getElementById('viewTitle').textContent = t('view.' + id + '.title');
     document.getElementById('viewActions').innerHTML = '';
     document.getElementById('content').innerHTML = '';
-    // Update only visible nav items.
-    const visibleViews = VIEWS.filter(v => !v.hidden);
-    document.querySelectorAll('.c-sidebar__nav-item').forEach((el, i) => {
-        el.classList.toggle('is-active', visibleViews[i] && visibleViews[i].id === id);
-    });
+    refreshNavHighlight();
     v.render(document.getElementById('content'));
 }
 
