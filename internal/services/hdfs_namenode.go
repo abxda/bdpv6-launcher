@@ -41,6 +41,13 @@ func (n *HDFSNameNode) Name() string        { return "HDFS NameNode" }
 func (n *HDFSNameNode) Port() int           { return n.port }
 func (n *HDFSNameNode) Logs() *logsink.Sink { return n.sink }
 
+// RequiredPorts returns BOTH ports the NameNode needs free before Start:
+// the web UI (typically 9870, but honors the override) and the RPC port
+// (9000, hardcoded in core-site.xml). Surfaced by the App's preflight
+// so a zombie on either port aborts before we spawn another JVM that
+// would crash with Address already in use.
+func (n *HDFSNameNode) RequiredPorts() []int { return []int{n.port, 9000} }
+
 func (n *HDFSNameNode) Start(ctx context.Context) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()

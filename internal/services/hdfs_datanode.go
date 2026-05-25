@@ -36,6 +36,12 @@ func (d *HDFSDataNode) Name() string        { return "HDFS DataNode" }
 func (d *HDFSDataNode) Port() int           { return d.port }
 func (d *HDFSDataNode) Logs() *logsink.Sink { return d.sink }
 
+// RequiredPorts returns both the web UI port (9864 default) and the data
+// transfer port (9866 hardcoded in DataNode defaults). The user's last
+// failure was on 9866 — that's the port the launcher needs to check
+// for collisions before spawning a doomed-to-crash JVM.
+func (d *HDFSDataNode) RequiredPorts() []int { return []int{d.port, 9866} }
+
 func (d *HDFSDataNode) Start(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

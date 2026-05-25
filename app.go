@@ -391,7 +391,66 @@ func (a *App) StartService(id string) error {
 	if !ok {
 		return fmt.Errorf("servicio desconocido: %s", id)
 	}
+	if err := a.preflightPorts(svc); err != nil {
+		return err
+	}
 	return svc.Start(a.ctx)
+}
+
+// preflightPorts checks every port the service needs is free (or held by
+// the service itself, in case of a Start-while-Running). Without this,
+// a stale JVM zombie from a previous run would let the service Start
+// succeed up to the point where Java tries to bind, then crash with a
+// cryptic "Address already in use" deep in a Hadoop stack trace.
+// Surfacing it here gives the student a clear, actionable error.
+func (a *App) preflightPorts(svc services.Service) error {
+	ourPID := svc.Status().PID
+	type portRequirer interface{ RequiredPorts() []int }
+	required := []int{svc.Port()}
+	if pr, ok := svc.(portRequirer); ok {
+		required = pr.RequiredPorts()
+	}
+	for _, port := range required {
+		own := ports.WhoOwns(port)
+		if own.PID == 0 {
+			continue // free
+		}
+		if own.PID == ourPID {
+			continue // it's already us
+		}
+		// Someone else owns it. Surface a clear actionable error.
+		name := own.Name
+		if name == "" {
+			name = "proceso desconocido"
+		}
+		return fmt.Errorf(
+			"puerto %d ya está ocupado por %s (PID %d). "+
+				"Abre el tab Puertos para liberarlo, o termínalo desde Administrador de tareas.",
+			port, name, own.PID,
+		)
+	}
+	return nil
+}
+
+// KillPortHolder terminates whichever process is currently bound to the
+// given local port. Refuses to kill one of the launcher's own services
+// (use the Stop button for those). Returns a clear error message that
+// the UI surfaces verbatim.
+func (a *App) KillPortHolder(port int) error {
+	own := ports.WhoOwns(port)
+	if own.PID == 0 {
+		return fmt.Errorf("el puerto %d ya está libre", port)
+	}
+	// Refuse to kill one of our own services through this path.
+	for _, svc := range a.registry.All() {
+		if svc.Status().PID == own.PID {
+			return fmt.Errorf("ese puerto pertenece al servicio %q — usa el botón Detener en su lugar para que el shutdown sea gracioso", svc.Name())
+		}
+	}
+	if err := ports.KillByPID(own.PID); err != nil {
+		return fmt.Errorf("no pude matar PID %d (%s): %w", own.PID, own.Name, err)
+	}
+	return nil
 }
 
 func (a *App) StopService(id string) error {

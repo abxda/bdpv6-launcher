@@ -15,8 +15,26 @@ import (
 
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
+	"github.com/abxda/bdpv6-launcher/internal/ports"
 	"github.com/abxda/bdpv6-launcher/internal/services"
 )
+
+// sweepPort is a defensive last-resort cleanup. If a service's Stop()
+// didn't fully kill its JVM (Windows + Java can be quirky), the port
+// stays bound by a zombie process. We find the owner and SIGKILL it so
+// the next test (or the user's next launcher session) doesn't inherit
+// "Address already in use" failures.
+func sweepPort(t *testing.T, port int) {
+	own := ports.WhoOwns(port)
+	if own.PID == 0 {
+		return // already free
+	}
+	if err := ports.KillByPID(own.PID); err != nil {
+		t.Logf("sweepPort(%d): could not kill PID %d (%s): %v", port, own.PID, own.Name, err)
+		return
+	}
+	t.Logf("sweepPort(%d): killed zombie PID %d (%s) holding the port", port, own.PID, own.Name)
+}
 
 // TestE2E_WordCountIdempotent is the gold-standard regression test: it
 // spawns a real NameNode + DataNode, discovers Ejercicio_01, runs all 5
@@ -47,6 +65,13 @@ func TestE2E_WordCountIdempotent(t *testing.T) {
 		defer cn()
 		_ = nn.GracefulPreStop(c)
 		_ = nn.Stop(c)
+		// Defensive sweep: if the JVM somehow outlived Stop() (it has
+		// happened — Java + taskkill is not always perfectly reliable on
+		// Windows), kill anything still holding the NameNode ports so
+		// the next test or the user's next launcher run does not
+		// inherit zombies.
+		sweepPort(t, 9870)
+		sweepPort(t, 9000)
 	})
 
 	if err := waitHealthy(t, nn.Status, 60*time.Second, "namenode"); err != nil {
@@ -60,6 +85,8 @@ func TestE2E_WordCountIdempotent(t *testing.T) {
 		c, cn := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cn()
 		_ = dn.Stop(c)
+		sweepPort(t, 9864)
+		sweepPort(t, 9866)
 	})
 	if err := waitHealthy(t, dn.Status, 30*time.Second, "datanode"); err != nil {
 		t.Fatal(err)

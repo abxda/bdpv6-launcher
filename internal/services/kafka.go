@@ -54,6 +54,10 @@ func (k *Kafka) Name() string           { return "Kafka" }
 func (k *Kafka) Port() int              { return k.port }
 func (k *Kafka) Logs() *logsink.Sink    { return k.sink }
 
+// RequiredPorts returns the broker listener (default 9092) and the
+// controller listener (9093, defined in server.properties).
+func (k *Kafka) RequiredPorts() []int { return []int{k.port, 9093} }
+
 func (k *Kafka) Start(ctx context.Context) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()

@@ -122,6 +122,9 @@ const STR = {
         'ports.editApplied':      'Puerto guardado. Reinicia el servicio para aplicar.',
         'ports.suggestApplied':   'Sugerido: {0}. Guardado como override.',
         'ports.noFree':           'No se encontró puerto libre cercano.',
+        'ports.free':             'Liberar puerto',
+        'ports.freeConfirm':      'Matar el proceso ocupante (PID {0} {1}) para liberar el puerto {2}?\\n\\nEsto envía taskkill /F al PID. Asegúrate que no sea algo importante tuyo.',
+        'ports.freed':            'Puerto {0} liberado.',
         'ports.help':             'Las filas en rojo están ocupadas por otro proceso. Usa "Sugerir libre" para encontrar un puerto alternativo o cierra el proceso conflictivo.',
         'view.wizard.title':      'Configuración inicial',
         'wizard.intro':           'Este asistente prepara el entorno BDP la primera vez que lo usas. Solo necesitas ejecutarlo una vez por distribución.',
@@ -258,6 +261,9 @@ const STR = {
         'ports.editApplied':      'Port saved. Restart the service to apply.',
         'ports.suggestApplied':   'Suggested: {0}. Saved as override.',
         'ports.noFree':           'No free port found nearby.',
+        'ports.free':             'Free port',
+        'ports.freeConfirm':      'Kill the holding process (PID {0} {1}) to free port {2}?\\n\\nThis sends taskkill /F to the PID. Make sure it is nothing important of yours.',
+        'ports.freed':            'Port {0} freed.',
         'ports.help':             'Rows in red are bound by another process. Use "Suggest free" to find an alternative, or close the conflicting process.',
         'view.wizard.title':      'First-run setup',
         'wizard.intro':           'This wizard prepares the BDP environment the first time you use it. You only need to run it once per distribution.',
@@ -1283,7 +1289,11 @@ async function paintPorts(root) {
         const owner = (p.status === 'other' && p.owner) ?
             esc(p.owner.name || '?') + ' <code>PID ' + (p.owner.pid || '?') + '</code>' :
             '';
+        const freeBtn = (p.status === 'other' && p.owner && p.owner.pid > 0)
+            ? '<button class="c-btn c-btn--danger" data-act="kill" data-port="' + p.port + '" data-pid="' + (p.owner.pid || 0) + '" data-name="' + esc(p.owner.name || '?') + '">' + iconHTML('trash') + ' ' + t('ports.free') + '</button>'
+            : '';
         const actions =
+            freeBtn +
             '<button class="c-btn" data-act="suggest" data-id="' + p.serviceId + '" data-from="' + p.port + '">' + iconHTML('refresh') + ' ' + t('ports.suggest') + '</button>' +
             '<button class="c-btn" data-act="edit"    data-id="' + p.serviceId + '" data-name="' + esc(p.serviceName) + '">' + iconHTML('settings') + ' ' + t('ports.edit') + '</button>';
         return '<tr class="' + rowClass + '">' +
@@ -1323,6 +1333,16 @@ async function paintPorts(root) {
                 try {
                     await window.go.main.App.SetPortOverride(id, n);
                     alert(t('ports.editApplied'));
+                    paintPorts(root);
+                } catch (e) { alert('Error: ' + e); }
+            } else if (act === 'kill') {
+                const port = parseInt(btn.dataset.port, 10);
+                const pid  = parseInt(btn.dataset.pid, 10);
+                const name = btn.dataset.name;
+                if (!confirm(t('ports.freeConfirm', pid, name, port))) return;
+                try {
+                    await window.go.main.App.KillPortHolder(port);
+                    alert(t('ports.freed', port));
                     paintPorts(root);
                 } catch (e) { alert('Error: ' + e); }
             }
