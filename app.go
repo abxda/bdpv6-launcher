@@ -665,6 +665,18 @@ func (a *App) StopExerciseStep(exerciseID string) {
 	}
 }
 
+// OpenExerciseBash spawns a new git-bash.exe window pre-configured with
+// JDK / Hadoop / Python on PATH, cwd at the exercise dir, and a teaching
+// cheat-sheet of useful commands printed on first prompt. Lets students
+// experiment freely without leaving the launcher ecosystem.
+func (a *App) OpenExerciseBash(exerciseID string) error {
+	s := a.sessionFor(exerciseID)
+	if s == nil {
+		return fmt.Errorf("ejercicio desconocido: %s", exerciseID)
+	}
+	return exercises.OpenBashSession(a.paths, s.ex)
+}
+
 // IsExerciseRunning lets the UI initialise the Run/Stop button state on
 // view enter (the state event covers subsequent changes).
 func (a *App) IsExerciseRunning(exerciseID string) bool {

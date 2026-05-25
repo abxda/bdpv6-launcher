@@ -45,8 +45,8 @@ func TestDiscover_WordCountTemplate(t *testing.T) {
 	if ex.Template != "wordcount" {
 		t.Errorf("template = %q, want %q", ex.Template, "wordcount")
 	}
-	if len(ex.Steps) != 5 {
-		t.Errorf("steps = %d, want 5", len(ex.Steps))
+	if len(ex.Steps) != 6 {
+		t.Errorf("steps = %d, want 6 (safe-mode-wait + 5 work steps)", len(ex.Steps))
 	}
 	if len(ex.Requires) == 0 {
 		t.Error("WordCount exercise must declare its HDFS prerequisites")

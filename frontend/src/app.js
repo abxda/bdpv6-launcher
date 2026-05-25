@@ -56,6 +56,8 @@ const STR = {
         'ex.stop':          'Detener',
         'ex.stopping':      'Deteniendo…',
         'ex.running':       'Ejecutando…',
+        'ex.openBash':      'Abrir consola Bash',
+        'ex.openBashHelp':  'Abre una nueva ventana de bash con HADOOP_HOME, JAVA_HOME y PATH preconfigurados, cwd en la carpeta del ejercicio, y una hoja de comandos útiles.',
         'ex.refresh':       'Re-descubrir',
         'ex.requires':      'Requiere:',
         'ex.files':         'Archivos:',
@@ -190,6 +192,8 @@ const STR = {
         'ex.stop':          'Stop',
         'ex.stopping':      'Stopping…',
         'ex.running':       'Running…',
+        'ex.openBash':      'Open Bash console',
+        'ex.openBashHelp':  'Opens a new bash window with HADOOP_HOME, JAVA_HOME and PATH preconfigured, cwd at the exercise folder, and a cheat sheet of useful commands.',
         'ex.refresh':       'Re-discover',
         'ex.requires':      'Requires:',
         'ex.files':         'Files:',
@@ -1017,10 +1021,15 @@ function renderExerciseHeader(root, ex) {
         : '<button class="c-btn c-btn--primary" id="actExRunAll">' + iconHTML('play') + ' ' + t('ex.runAll') + '</button>';
     document.getElementById('viewActions').innerHTML =
         '<button class="c-btn" id="actExBack">' + iconHTML('layout') + ' ' + t('ex.back') + '</button>' +
+        '<button class="c-btn" id="actExBash" title="' + esc(t('ex.openBashHelp')) + '">' + iconHTML('terminal') + ' ' + t('ex.openBash') + '</button>' +
         mainBtn;
     document.getElementById('actExBack').addEventListener('click', () => {
         exerciseActive = null;
         renderExercises(root);
+    });
+    document.getElementById('actExBash').addEventListener('click', async () => {
+        try { await window.go.main.App.OpenExerciseBash(ex.id); }
+        catch (e) { alert('Error: ' + e); }
     });
     const stopBtn = document.getElementById('actExStop');
     const runBtn = document.getElementById('actExRunAll');

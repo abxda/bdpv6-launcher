@@ -34,46 +34,39 @@ func TestStreamingStep_NoFilesNoComma(t *testing.T) {
 		Hadoop:    filepath.Join(distro, "hadoop"),
 	}
 	ex := wordCountExercise(p, "ej01", "Ejercicio_01", dir, []string{"data.csv", "mapper.py", "reducer.py"})
-	if ex == nil || len(ex.Steps) < 4 {
-		t.Fatal("template did not produce step 4")
+	if ex == nil || len(ex.Steps) < 5 {
+		t.Fatal("template did not produce step 5 (the streaming job)")
 	}
-	step := ex.Steps[3]
+	// Step 5 in the new layout is the streaming job (step 1 is safe-mode-wait).
+	step := ex.Steps[4]
 
-	// Walk the args looking for -files (must NOT be present) and for the
-	// -mapper / -reducer values (must contain forward-slash absolute paths
-	// to mapper.py and reducer.py, no backslashes that would trip Hadoop's
-	// command-string tokenizer when it interprets the value).
-	var hasMapper, hasReducer bool
-	for i, arg := range step.Args {
-		if arg == "-files" {
-			t.Errorf("step 4 still has -files; that broke on hadoop.cmd's comma re-tokenization")
-		}
-		if arg == "-mapper" && i+1 < len(step.Args) {
-			v := step.Args[i+1]
-			if !strings.Contains(v, "mapper.py") {
-				t.Errorf("-mapper value %q does not reference mapper.py", v)
-			}
-			if strings.Contains(v, "\\") {
-				t.Errorf("-mapper value %q has a backslash; use filepath.ToSlash", v)
-			}
-			hasMapper = true
-		}
-		if arg == "-reducer" && i+1 < len(step.Args) {
-			v := step.Args[i+1]
-			if !strings.Contains(v, "reducer.py") {
-				t.Errorf("-reducer value %q does not reference reducer.py", v)
-			}
-			if strings.Contains(v, "\\") {
-				t.Errorf("-reducer value %q has a backslash", v)
-			}
-			hasReducer = true
-		}
+	// Step 5 is now a bash -lc invocation that chains an idempotent
+	// pre-clean ("hdfs dfs -rm ...") and the actual streaming job. The
+	// full command string lives in step.Args[1]. We assert on its
+	// contents instead of the old "are -mapper / -reducer separate
+	// args" check.
+	if !step.Shell {
+		t.Error("step 5 is no longer marked Shell:true — that breaks the bash wrap")
 	}
-	if !hasMapper {
-		t.Error("step 4 does not pass -mapper")
+	if len(step.Args) < 2 || step.Args[0] != "-lc" {
+		t.Fatalf("step 5 args = %#v, want [-lc <script>]", step.Args)
 	}
-	if !hasReducer {
-		t.Error("step 4 does not pass -reducer")
+	script := step.Args[1]
+
+	if strings.Contains(script, "-files") {
+		t.Error("step 5 still has -files; that broke on hadoop.cmd's comma re-tokenization")
+	}
+	if !strings.Contains(script, "mapper.py") {
+		t.Error("step 5 script does not reference mapper.py")
+	}
+	if !strings.Contains(script, "reducer.py") {
+		t.Error("step 5 script does not reference reducer.py")
+	}
+	if !strings.Contains(script, "hdfs") || !strings.Contains(script, "-rm") {
+		t.Error("step 5 script lost the idempotent pre-clean (rm output)")
+	}
+	if !strings.Contains(script, "framework.name=local") {
+		t.Error("step 5 script must force LocalJobRunner; -Dmapreduce.framework.name=local missing")
 	}
 }
 

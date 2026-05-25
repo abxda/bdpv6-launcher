@@ -176,11 +176,22 @@ func (r *Runner) execStep(ctx context.Context, s Step, num, total int) error {
 // embedded JDK + Python + Hadoop bin dirs so `hadoop`, `hdfs`, `python`
 // and `java` resolve from the BDP distribution regardless of what the
 // student has installed on their machine.
+//
+// MSYS_NO_PATHCONV / MSYS2_ARG_CONV_EXCL disable MSYS path mangling
+// when steps run through the bundled git-bash. Without them, a path
+// argument like "/ej01/output" passed from bash to a Windows-native
+// binary (hadoop.cmd, hdfs.cmd) gets rewritten to
+// "<msys-root>/ej01/output" because MSYS's runtime tries to "translate"
+// what it thinks is a Unix absolute path. That broke step 5's hadoop
+// streaming call: HDFS got "/D:/BDP/BDPV4_WIN/bash/ej01/output" and
+// rejected it as "not a valid DFS filename".
 func (r *Runner) buildEnv() []string {
 	overrides := map[string]string{
-		"JAVA_HOME":       r.p.CommonJDK,
-		"HADOOP_HOME":     r.p.Hadoop,
-		"HADOOP_CONF_DIR": r.p.HadoopConf,
+		"JAVA_HOME":            r.p.CommonJDK,
+		"HADOOP_HOME":          r.p.Hadoop,
+		"HADOOP_CONF_DIR":      r.p.HadoopConf,
+		"MSYS_NO_PATHCONV":     "1",
+		"MSYS2_ARG_CONV_EXCL":  "*",
 	}
 	pathDirs := []string{
 		filepath.Join(r.p.CommonJDK, "bin"),
