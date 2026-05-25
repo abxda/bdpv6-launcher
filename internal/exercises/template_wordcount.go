@@ -99,9 +99,9 @@ func wordCountExercise(p *paths.Paths, id, name, dir string, files []string) *Ex
 		},
 		{
 			Title: "6 · Top-20 palabras más frecuentes",
-			Notes: "Leemos la salida del reducer (part-00000), ordenamos por la columna 2 numérica descendente, y mostramos los 20 primeros tokens. Usamos bash con MSYS_NO_PATHCONV=1 y referenciamos `hdfs` por nombre (no por path absoluto) porque bash interpreta los backslashes del path Windows como secuencias de escape — los path absolutos se reciben como D:BDPBDPV4_WINhadoopbinhdfs.cmd y fallan con 'command not found'.",
+			Notes: "Leemos la salida del reducer (part-00000), ordenamos por la columna 2 numérica descendente, y mostramos los 20 primeros tokens. Llamamos a `hdfs.cmd` con extensión .cmd porque bash en MSYS, al buscar 'hdfs' en PATH, prefiere el script shell `hdfs` (sin extensión, pensado para Linux) sobre `hdfs.cmd` (Windows). El script Linux construye la CLASSPATH con convenciones Unix y falla con ClassNotFoundException en Windows.",
 			Cmd:   bashBin,
-			Args:  []string{"-lc", "hdfs dfs -cat " + hdfsOutput + "/part-00000 | sort -t$'\\t' -k2 -nr | head -20"},
+			Args:  []string{"-lc", "hdfs.cmd dfs -cat " + hdfsOutput + "/part-00000 | sort -t$'\\t' -k2 -nr | head -20"},
 			Shell: true,
 			PrintAs: "hdfs dfs -cat " + hdfsOutput + "/part-00000 \\\n" +
 				"  | sort -t$'\\t' -k2 -nr | head -20",

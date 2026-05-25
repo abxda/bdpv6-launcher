@@ -10,22 +10,26 @@ import (
 	"github.com/abxda/bdpv6-launcher/internal/paths"
 )
 
-// OpenBashSession spawns a new git-bash.exe window pre-configured with the
-// JDK / Hadoop / Python env vars, cd'd to the exercise directory, and
-// greeted with a teacher-written cheat-sheet of useful commands.
+// OpenBashSession spawns a new interactive mintty + bash window pre-
+// configured with the JDK / Hadoop / Python env vars, cd'd to the
+// exercise directory, and greeted with a Spanish teacher's cheat sheet
+// of useful commands.
 //
-// The shell is fully interactive — the student can type whatever they want
-// (hdfs dfs -ls, python mapper.py | sort | python reducer.py, etc.) without
-// having to remember the env setup themselves.
-//
-// Implementation: writes a one-shot bashrc to <data>/.bash-launcher-<id>.rc
-// then spawns git-bash via cmd /c start so the window is detached from the
-// launcher process. The bashrc sets env, cd's, prints the welcome, then
-// sources the user's normal ~/.bashrc so their aliases still work.
+// We bypass git-bash.exe and call mintty.exe + bash.exe directly because
+// git-bash's argument forwarding is fragile: passing both --cd= options
+// and an inner bash command line at once results in "/usr/bin/bash:
+// cannot execute binary file" (git-bash mis-parses the args and tries to
+// run /usr/bin/bash as a script). Driving mintty directly is what
+// git-bash itself does internally — same UX, no foot-gun.
 func OpenBashSession(p *paths.Paths, ex Exercise) error {
-	bashExe := resolveGitBash(p)
-	if bashExe == "" {
-		return fmt.Errorf("no encontré git-bash.exe en la distribución (esperaba bash/git-bash.exe)")
+	bashRoot := filepath.Join(p.ScriptDir, "bash")
+	mintty := filepath.Join(bashRoot, "usr", "bin", "mintty.exe")
+	bash := filepath.Join(bashRoot, "usr", "bin", "bash.exe")
+	if _, err := os.Stat(mintty); err != nil {
+		return fmt.Errorf("no encontré mintty.exe en bash/usr/bin/ — ¿está el bash portable copiado en la distribución?")
+	}
+	if _, err := os.Stat(bash); err != nil {
+		return fmt.Errorf("no encontré bash.exe en bash/usr/bin/")
 	}
 
 	rcPath, err := writeWelcomeBashrc(p, ex)
@@ -33,40 +37,54 @@ func OpenBashSession(p *paths.Paths, ex Exercise) error {
 		return fmt.Errorf("escribir bashrc temporal: %w", err)
 	}
 
-	// Spawn detached via cmd /c start "" ... so the bash window has its own
-	// lifecycle and the launcher process keeps going. The empty "" is the
-	// window title arg that `start` needs when the next token is quoted.
-	args := []string{
-		"/c", "start", "", bashExe,
-		"--no-needs-console",
-		"--cd=" + toForwardSlash(ex.Path),
-		"-i", "-l",
-		"/usr/bin/bash", "--rcfile", toForwardSlash(rcPath),
+	// mintty + bash invocation:
+	//   mintty -i ICON -h always -e bash --rcfile <rc> -i
+	// -h always keeps the window open if bash exits unexpectedly so the
+	// student can read the error. We launch via cmd /c start "" so the
+	// window is detached from the launcher process.
+	icon := filepath.Join(bashRoot, "mingw64", "share", "git", "git-for-windows.ico")
+	args := []string{"/c", "start", "", mintty, "-h", "always"}
+	if _, err := os.Stat(icon); err == nil {
+		args = append(args, "-i", icon)
 	}
+	args = append(args,
+		"-e", bash,
+		"--rcfile", toForwardSlash(rcPath),
+		"-i",
+	)
+
 	cmd := exec.Command("cmd.exe", args...)
+	cmd.Dir = ex.Path
+	// Propagate JAVA_HOME / HADOOP_HOME / HADOOP_CONF_DIR / PATH so the
+	// new bash window inherits them — the .rcfile reinforces it too,
+	// but having them in env from the start makes "echo $JAVA_HOME"
+	// work before the welcome banner runs.
+	cmd.Env = bashLaunchEnv(p)
 	cmd.SysProcAttr = bashLaunchSysAttr()
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("lanzar bash: %w", err)
+		return fmt.Errorf("lanzar mintty+bash: %w", err)
 	}
-	// We deliberately don't Wait() — the bash window outlives this call.
 	return nil
 }
 
-// resolveGitBash prefers the bundled git-bash.exe (so the student doesn't
-// need Git for Windows installed) and falls back to PATH.
-func resolveGitBash(p *paths.Paths) string {
-	candidates := []string{
-		filepath.Join(p.ScriptDir, "bash", "git-bash.exe"),
+// bashLaunchEnv composes the environment the spawned bash will inherit.
+// Same overrides as the exercise runner.
+func bashLaunchEnv(p *paths.Paths) []string {
+	overrides := map[string]string{
+		"JAVA_HOME":           p.CommonJDK,
+		"HADOOP_HOME":         p.Hadoop,
+		"HADOOP_CONF_DIR":     p.HadoopConf,
+		"MSYS_NO_PATHCONV":    "1",
+		"MSYS2_ARG_CONV_EXCL": "*",
 	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
+	pathDirs := []string{
+		filepath.Join(p.CommonJDK, "bin"),
+		filepath.Join(p.Hadoop, "bin"),
+		p.Python,
+		filepath.Join(p.Python, "Scripts"),
 	}
-	if found, err := exec.LookPath("git-bash"); err == nil {
-		return found
-	}
-	return ""
+	overrides["PATH"] = mergePath(pathDirs)
+	return mergeOSEnv(overrides)
 }
 
 // writeWelcomeBashrc materialises a one-shot bashrc that sets env vars,
@@ -91,17 +109,20 @@ func writeWelcomeBashrc(p *paths.Paths, ex Exercise) (string, error) {
 	id := ex.ID
 
 	body := `# Auto-generated by BDPV6 Launcher for exercise ` + ex.ID + `.
-# Sets env so 'hdfs', 'hadoop', 'python' all resolve from this distro.
+# Re-establishes env so 'hdfs', 'hadoop', 'python' resolve from this distro
+# even if some tool further down the line wipes PATH.
 
 export JAVA_HOME="` + javaHome + `"
 export HADOOP_HOME="` + hadoopHome + `"
 export HADOOP_CONF_DIR="` + hadoopConf + `"
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
 export PATH="$JAVA_HOME/bin:$HADOOP_HOME/bin:` + python + `:` + python + `/Scripts:$PATH"
-
-cd "` + exDir + `" 2>/dev/null
 
 # Source the user's normal bashrc so their prompt and aliases keep working.
 [ -f ~/.bashrc ] && source ~/.bashrc
+
+cd "` + exDir + `" 2>/dev/null
 
 # --- Welcome / cheat sheet ----------------------------------------------
 echo ""
@@ -114,26 +135,30 @@ echo "   JAVA_HOME    = $JAVA_HOME"
 echo "   HADOOP_HOME  = $HADOOP_HOME"
 echo "   cwd          = $(pwd)"
 echo ""
+echo " Tip: usa 'hdfs.cmd' y 'hadoop.cmd' (no 'hdfs' / 'hadoop' a secas)"
+echo "      porque bash en MSYS prefiere los scripts Linux que vienen sin"
+echo "      extension y no funcionan correctamente en Windows."
+echo ""
 echo " Comandos útiles (esta carpeta):"
 echo "   ls                                  # archivos del ejercicio"
 echo "   cat breweries.csv | head            # ver primeras líneas del input"
 echo ""
 echo " HDFS:"
-echo "   hdfs dfs -ls /` + id + `/input             # ver input subido"
-echo "   hdfs dfs -ls /` + id + `/output            # ver output del job"
-echo "   hdfs dfs -cat /` + id + `/output/part-00000 | head -20"
-echo "   hdfs dfsadmin -safemode get         # ¿está HDFS listo?"
+echo "   hdfs.cmd dfs -ls /` + id + `/input         # ver input subido"
+echo "   hdfs.cmd dfs -ls /` + id + `/output        # ver output del job"
+echo "   hdfs.cmd dfs -cat /` + id + `/output/part-00000 | head -20"
+echo "   hdfs.cmd dfsadmin -safemode get     # ¿está HDFS listo?"
 echo ""
 echo " Probar mapper+reducer SIN Hadoop (en pipe Unix):"
 echo "   cat breweries.csv | python mapper.py | sort | python reducer.py | head"
 echo ""
 echo " Lanzar el job MapReduce a mano:"
-echo "   hadoop jar \$HADOOP_HOME/share/hadoop/tools/lib/hadoop-streaming-*.jar \\"
+echo "   hadoop.cmd jar \$HADOOP_HOME/share/hadoop/tools/lib/hadoop-streaming-*.jar \\"
 echo "       -Dmapreduce.framework.name=local \\"
 echo "       -mapper 'python mapper.py' -reducer 'python reducer.py' \\"
 echo "       -input /` + id + `/input -output /` + id + `/output"
 echo ""
-echo " Tip: escribe 'exit' para cerrar esta consola."
+echo " Tip: escribe 'exit' o pulsa Ctrl+D para cerrar esta consola."
 echo "================================================================"
 echo ""
 `
