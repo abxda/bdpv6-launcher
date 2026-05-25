@@ -13,6 +13,7 @@ import (
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/abxda/bdpv6-launcher/internal/exercises"
 	"github.com/abxda/bdpv6-launcher/internal/hdfsfs"
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
@@ -39,6 +40,12 @@ type App struct {
 	repairSink *logsink.Sink
 	repair     *repair.Repairer
 
+	// exercises are discovered lazily on first ListExercises() call and
+	// then cached. exerciseRunners holds one Runner+sink per exercise id.
+	exMu            sync.Mutex
+	exerciseList    []exercises.Exercise
+	exerciseRunners map[string]*exerciseSession
+
 	logSubsMu sync.Mutex
 	logSubs   map[string]int // service id → logsink sub id, so we can detach on shutdown
 
@@ -58,16 +65,27 @@ func NewApp() *App {
 	repairSink := logsink.New("repair", p.Logs, 2000)
 	setupOrc := setup.New(p, st, setupSink)
 	a := &App{
-		paths:      p,
-		state:      st,
-		registry:   services.NewRegistry(),
-		setupSink:  setupSink,
-		setup:      setupOrc,
-		repairSink: repairSink,
-		repair:     repair.New(p, st, repairSink, setupOrc),
-		logSubs:    map[string]int{},
+		paths:           p,
+		state:           st,
+		registry:        services.NewRegistry(),
+		setupSink:       setupSink,
+		setup:           setupOrc,
+		repairSink:      repairSink,
+		repair:          repair.New(p, st, repairSink, setupOrc),
+		logSubs:         map[string]int{},
+		exerciseRunners: map[string]*exerciseSession{},
 	}
 	return a
+}
+
+// exerciseSession bundles the runner + its log sink + a once-only event
+// pump so each ExerciseTab subscription only fires the line-forward
+// goroutine once.
+type exerciseSession struct {
+	ex     exercises.Exercise
+	sink   *logsink.Sink
+	runner *exercises.Runner
+	pumped bool
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -536,6 +554,96 @@ func (a *App) GetRepairLogs() []logsink.Line {
 		return nil
 	}
 	return a.repairSink.Snapshot()
+}
+
+// --- exercises --------------------------------------------------------------
+
+// ListExercises returns the playable exercises discovered next to the BDP
+// distribution. Cheap to call on every Exercises tab open.
+func (a *App) ListExercises() []exercises.Exercise {
+	a.exMu.Lock()
+	defer a.exMu.Unlock()
+	if a.exerciseList == nil {
+		a.exerciseList = exercises.Discover(a.paths)
+	}
+	return a.exerciseList
+}
+
+// sessionFor lazily builds (or returns the cached) per-exercise session.
+// First call also starts the goroutine that forwards sink lines to the
+// "exercise:<id>:log" Wails event.
+func (a *App) sessionFor(id string) *exerciseSession {
+	a.exMu.Lock()
+	defer a.exMu.Unlock()
+	if s, ok := a.exerciseRunners[id]; ok {
+		return s
+	}
+	// Ensure the master list is loaded.
+	if a.exerciseList == nil {
+		a.exerciseList = exercises.Discover(a.paths)
+	}
+	var ex *exercises.Exercise
+	for i := range a.exerciseList {
+		if a.exerciseList[i].ID == id {
+			ex = &a.exerciseList[i]
+			break
+		}
+	}
+	if ex == nil {
+		return nil
+	}
+	sink := logsink.New("ex-"+id, a.paths.Logs, 4000)
+	s := &exerciseSession{
+		ex:     *ex,
+		sink:   sink,
+		runner: exercises.NewRunner(*ex, a.paths, sink),
+	}
+	a.exerciseRunners[id] = s
+
+	// One subscription per session, forwards every line as an event.
+	_, ch := sink.Subscribe()
+	eventName := "exercise:" + id + ":log"
+	go func() {
+		for line := range ch {
+			wailsruntime.EventsEmit(a.ctx, eventName, line)
+		}
+	}()
+	return s
+}
+
+// RunExerciseStep executes one step (0-indexed) of the given exercise.
+func (a *App) RunExerciseStep(exerciseID string, stepIdx int) error {
+	s := a.sessionFor(exerciseID)
+	if s == nil {
+		return fmt.Errorf("ejercicio desconocido: %s", exerciseID)
+	}
+	return s.runner.RunStep(a.ctx, stepIdx)
+}
+
+// RunAllExerciseSteps runs every step in order, stopping on the first failure.
+func (a *App) RunAllExerciseSteps(exerciseID string) error {
+	s := a.sessionFor(exerciseID)
+	if s == nil {
+		return fmt.Errorf("ejercicio desconocido: %s", exerciseID)
+	}
+	return s.runner.RunAll(a.ctx)
+}
+
+// GetExerciseLogs returns the ring-buffer snapshot for the exercise console.
+func (a *App) GetExerciseLogs(exerciseID string) []logsink.Line {
+	s := a.sessionFor(exerciseID)
+	if s == nil {
+		return nil
+	}
+	return s.sink.Snapshot()
+}
+
+// ClearExerciseLogs wipes the per-exercise ring buffer (just the UI cache;
+// the on-disk log file under logs/ex-<id>.log is preserved).
+func (a *App) ClearExerciseLogs(exerciseID string) {
+	if s := a.sessionFor(exerciseID); s != nil {
+		s.sink.Clear()
+	}
 }
 
 // --- HDFS explorer ---------------------------------------------------------

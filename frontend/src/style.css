@@ -244,6 +244,31 @@ svg {
 }
 .c-placeholder svg { width: 28px; height: 28px; opacity: 0.6; }
 
+/* Exercises tab */
+.c-ex-card { cursor: pointer; transition: transform 60ms, box-shadow 60ms; }
+.c-ex-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); border-color: var(--color-brand); }
+.c-ex-header { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: var(--s-5); }
+.c-ex-step {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--s-4);
+    margin-bottom: var(--s-3);
+}
+.c-ex-step__head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); margin-bottom: var(--s-2); }
+.c-ex-step__notes { display: block; color: var(--color-text-muted); margin-bottom: var(--s-2); font-size: var(--fs-sm); }
+.c-ex-step__cmd {
+    margin: 0;
+    padding: var(--s-3);
+    background: #0b1220;
+    color: #cbd5e1;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    white-space: pre;
+    overflow-x: auto;
+}
+
 /* Shutdown overlay (graceful close) */
 .c-overlay {
     position: fixed;

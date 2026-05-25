@@ -47,6 +47,20 @@ const STR = {
         'nav.notebooks':    'Notebooks',
         'nav.settings':     'Configuración',
         'nav.wizard':       'Asistente',
+        'nav.exercises':    'Ejercicios',
+        'view.exercises.title': 'Ejercicios',
+        'ex.empty':         'No encontré ejercicios. Crea una carpeta D:\\BDP\\Ejercicio_NN\\ junto a tu distribución BDP y aparecerá aquí.',
+        'ex.openFolder':    'Abrir carpeta',
+        'ex.runAll':        'Ejecutar todos los pasos',
+        'ex.runStep':       'Ejecutar este paso',
+        'ex.refresh':       'Re-descubrir',
+        'ex.requires':      'Requiere:',
+        'ex.files':         'Archivos:',
+        'ex.steps':         'Pasos guiados',
+        'ex.console':       'Consola del ejercicio',
+        'ex.back':          'Volver a la lista',
+        'ex.prereqsOK':     'Pre-requisitos OK',
+        'ex.prereqsMiss':   'Falta iniciar:',
         'view.dashboard.title':   'Dashboard',
         'view.services.title':    'Servicios',
         'view.ports.title':       'Puertos',
@@ -164,6 +178,20 @@ const STR = {
         'nav.notebooks':    'Notebooks',
         'nav.settings':     'Settings',
         'nav.wizard':       'Wizard',
+        'nav.exercises':    'Exercises',
+        'view.exercises.title': 'Exercises',
+        'ex.empty':         'No exercises found. Create a folder D:\\BDP\\Ejercicio_NN\\ next to your BDP distribution and it will appear here.',
+        'ex.openFolder':    'Open folder',
+        'ex.runAll':        'Run all steps',
+        'ex.runStep':       'Run this step',
+        'ex.refresh':       'Re-discover',
+        'ex.requires':      'Requires:',
+        'ex.files':         'Files:',
+        'ex.steps':         'Guided steps',
+        'ex.console':       'Exercise console',
+        'ex.back':          'Back to list',
+        'ex.prereqsOK':     'Prerequisites OK',
+        'ex.prereqsMiss':   'Need to start:',
         'view.dashboard.title':   'Dashboard',
         'view.services.title':    'Services',
         'view.ports.title':       'Ports',
@@ -295,6 +323,7 @@ const VIEWS = [
     { id: 'dashboard', icon: 'layout',   render: renderDashboard, onLeave: null },
     { id: 'wizard',    icon: 'cpu',      render: renderWizard,    onLeave: null },
     { id: 'services',  icon: 'server',   render: renderServices,  onLeave: null },
+    { id: 'exercises', icon: 'book',     render: renderExercises, onLeave: null },
     { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh },
     { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null },
     { id: 'hdfs',      icon: 'folder',   render: renderHDFS,      onLeave: null },
@@ -839,6 +868,155 @@ async function renderNotebooks(root) {
             catch (e) { alert('Error: ' + e); }
         });
     });
+}
+
+/* ---------- Exercises tab ------------------------------------------------- */
+let exerciseActive = null;       // id of the exercise currently shown in detail
+const exerciseLogSubs = {};      // id → true once we've EventsOn'd this exercise
+
+async function renderExercises(root) {
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actExRefresh">' + iconHTML('refresh') + ' ' + t('ex.refresh') + '</button>';
+    document.getElementById('actExRefresh').addEventListener('click', async () => {
+        // Force a re-discover by reading again — the cache is on the Go side.
+        STATE.exercises = await window.go.main.App.ListExercises() || [];
+        renderExercises(root);
+    });
+
+    if (!STATE.exercises) {
+        try { STATE.exercises = await window.go.main.App.ListExercises() || []; } catch (e) { STATE.exercises = []; }
+    }
+    if (!STATE.exercises.length) {
+        root.innerHTML = '<div class="c-placeholder">' + iconHTML('info') + '<br/>' + t('ex.empty') + '</div>';
+        return;
+    }
+    if (exerciseActive) {
+        const ex = STATE.exercises.find(e => e.id === exerciseActive);
+        if (ex) { renderExerciseDetail(root, ex); return; }
+        exerciseActive = null;
+    }
+    renderExerciseList(root);
+}
+
+function renderExerciseList(root) {
+    const cards = STATE.exercises.map(ex => {
+        const reqs = (ex.requires || []).map(r => '<code>' + esc(r) + '</code>').join(' · ') || '<em>ninguno</em>';
+        return '<div class="c-card c-ex-card" data-ex="' + esc(ex.id) + '">' +
+            '<strong>' + esc(ex.title) + '</strong>' +
+            '<p style="margin: 6px 0; color: var(--color-text-muted); font-size: 13px;">' + esc(ex.description) + '</p>' +
+            '<small style="color: var(--color-text-muted);">' + t('ex.requires') + ' ' + reqs + '</small>' +
+        '</div>';
+    }).join('');
+    root.innerHTML = '<div class="c-card-grid">' + cards + '</div>';
+    root.querySelectorAll('.c-ex-card').forEach(c => {
+        c.addEventListener('click', () => {
+            exerciseActive = c.dataset.ex;
+            renderExercises(root);
+        });
+    });
+}
+
+async function renderExerciseDetail(root, ex) {
+    // Header actions: back to list + run all.
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actExBack">' + iconHTML('layout') + ' ' + t('ex.back') + '</button>' +
+        '<button class="c-btn c-btn--primary" id="actExRunAll">' + iconHTML('play') + ' ' + t('ex.runAll') + '</button>';
+    document.getElementById('actExBack').addEventListener('click', () => {
+        exerciseActive = null;
+        renderExercises(root);
+    });
+    document.getElementById('actExRunAll').addEventListener('click', async () => {
+        try { await window.go.main.App.RunAllExerciseSteps(ex.id); }
+        catch (e) { alert('Error: ' + e); }
+    });
+
+    // Subscribe once per session to live log events.
+    if (!exerciseLogSubs[ex.id] && window.runtime && window.runtime.EventsOn) {
+        window.runtime.EventsOn('exercise:' + ex.id + ':log', (line) => {
+            if (!STATE.logs['ex:' + ex.id]) STATE.logs['ex:' + ex.id] = [];
+            STATE.logs['ex:' + ex.id].push(line);
+            if (currentView === 'exercises' && exerciseActive === ex.id) appendExerciseLine(line);
+        });
+        exerciseLogSubs[ex.id] = true;
+    }
+
+    // Pre-req badges: read current statuses from STATE.statuses.
+    const missing = (ex.requires || []).filter(r => !(STATE.statuses[r] && STATE.statuses[r].running));
+    const prereq = missing.length === 0
+        ? '<span class="c-badge c-badge--ok">' + iconHTML('check') + ' ' + t('ex.prereqsOK') + '</span>'
+        : '<span class="c-badge c-badge--danger">' + iconHTML('alert') + ' ' + t('ex.prereqsMiss') + ' ' + missing.map(esc).join(', ') + '</span>';
+
+    const filesHtml = (ex.files || []).map(f => '<code>' + esc(f) + '</code>').join(' · ');
+
+    const stepsHtml = (ex.steps || []).map((s, i) => {
+        const printed = s.printAs || (s.cmd + ' ' + (s.args || []).join(' '));
+        return '<div class="c-ex-step">' +
+            '<div class="c-ex-step__head">' +
+                '<strong>' + esc(s.title) + '</strong>' +
+                '<button class="c-btn c-btn--primary" data-step="' + i + '">' + iconHTML('play') + ' ' + t('ex.runStep') + '</button>' +
+            '</div>' +
+            '<small class="c-ex-step__notes">' + esc(s.notes) + '</small>' +
+            '<pre class="c-ex-step__cmd">' + esc(printed) + '</pre>' +
+        '</div>';
+    }).join('');
+
+    root.innerHTML =
+        '<div class="c-ex-header">' +
+            '<h2 style="margin: 0 0 8px;">' + esc(ex.title) + '</h2>' +
+            '<p style="color: var(--color-text-muted); margin: 0 0 12px;">' + esc(ex.description) + '</p>' +
+            '<div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">' +
+                prereq +
+                '<small style="color: var(--color-text-muted);">📁 <code>' + esc(ex.path) + '</code></small>' +
+            '</div>' +
+            (filesHtml ? '<small style="display:block; margin-top:8px; color:var(--color-text-muted);">' + t('ex.files') + ' ' + filesHtml + '</small>' : '') +
+        '</div>' +
+        '<h3 style="margin: 20px 0 8px;">' + t('ex.steps') + '</h3>' +
+        '<div class="c-ex-steps">' + stepsHtml + '</div>' +
+        '<h3 style="margin: 20px 0 8px;">' + t('ex.console') + '</h3>' +
+        '<div class="c-console" style="height: 360px;">' +
+            '<div class="c-console__toolbar">' +
+                '<strong style="flex:1; color:var(--color-text-muted);">' + t('ex.console') + '</strong>' +
+                '<button class="c-btn" id="exCopyBtn">' + iconHTML('copy') + ' ' + t('consoles.copy') + '</button>' +
+                '<button class="c-btn" id="exClearBtn">' + iconHTML('trash') + ' ' + t('consoles.clear') + '</button>' +
+            '</div>' +
+            '<pre class="c-console__pane" id="exPane"></pre>' +
+        '</div>';
+
+    root.querySelectorAll('button[data-step]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try { await window.go.main.App.RunExerciseStep(ex.id, parseInt(btn.dataset.step, 10)); }
+            catch (e) { alert('Error: ' + e); }
+        });
+    });
+    document.getElementById('exCopyBtn').addEventListener('click', () => copyLines(STATE.logs['ex:' + ex.id] || []));
+    document.getElementById('exClearBtn').addEventListener('click', async () => {
+        try { await window.go.main.App.ClearExerciseLogs(ex.id); } catch (e) {}
+        STATE.logs['ex:' + ex.id] = [];
+        paintExerciseLog();
+    });
+
+    // Preload existing logs from the backend ring buffer.
+    if (!STATE.logs['ex:' + ex.id]) {
+        try { STATE.logs['ex:' + ex.id] = await window.go.main.App.GetExerciseLogs(ex.id) || []; }
+        catch (e) { STATE.logs['ex:' + ex.id] = []; }
+    }
+    paintExerciseLog();
+}
+
+function paintExerciseLog() {
+    const pane = document.getElementById('exPane');
+    if (!pane || !exerciseActive) return;
+    const lines = STATE.logs['ex:' + exerciseActive] || [];
+    if (!lines.length) { pane.innerHTML = '<span style="color:var(--color-text-muted);">(sin salida aún — haz click en un paso para ejecutarlo)</span>'; return; }
+    pane.innerHTML = lines.map(formatLineHTML).join('\n');
+    pane.scrollTop = pane.scrollHeight;
+}
+function appendExerciseLine(line) {
+    const pane = document.getElementById('exPane');
+    if (!pane) return;
+    if (pane.children.length === 1 && !pane.children[0].classList) pane.innerHTML = '';
+    pane.insertAdjacentHTML('beforeend', formatLineHTML(line) + '\n');
+    pane.scrollTop = pane.scrollHeight;
 }
 
 /* ---------- Repair tab ---------------------------------------------------- */

@@ -1,0 +1,125 @@
+package exercises
+
+import (
+	"path/filepath"
+	"strings"
+
+	"github.com/abxda/bdpv6-launcher/internal/paths"
+)
+
+// wordCountExercise builds the playbook for a Hadoop Streaming WordCount
+// exercise — the classic "count tokens in a CSV" assignment. Triggered
+// when discovery finds both mapper.py and reducer.py in the folder.
+//
+// Steps are intentionally split fine-grained so the student can run them
+// one at a time and SEE the output of each: prepare HDFS dir → upload
+// data → rm old output → run streaming jar → top-N results. Each step
+// is shown with a brief teacher's note explaining WHY, not just WHAT.
+func wordCountExercise(p *paths.Paths, id, name, dir string, files []string) *Exercise {
+	hdfsRoot := "/" + id
+	hdfsInput := hdfsRoot + "/input"
+	hdfsOutput := hdfsRoot + "/output"
+
+	// Locate the streaming jar. Hadoop bundles it as
+	//   share/hadoop/tools/lib/hadoop-streaming-<version>.jar
+	// We glob to avoid hard-coding the version.
+	streamingJar := findStreamingJar(p)
+
+	// Find the .csv to upload. If there are several, we pick the first
+	// alphabetically (deterministic; rare to have >1 in a single exercise).
+	dataset := ""
+	for _, f := range files {
+		if strings.HasSuffix(strings.ToLower(f), ".csv") {
+			dataset = f
+			break
+		}
+	}
+	if dataset == "" {
+		dataset = "input.txt"
+	}
+
+	// Bash binary for shell-piped steps. On Windows we look for the
+	// bundled GitPortable copy first (bash/usr/bin/bash.exe), falling
+	// back to system bash. On Unix we just use /bin/bash since every
+	// supported distro ships it.
+	bashBin := resolveBash(p)
+
+	steps := []Step{
+		{
+			Title: "1 · Preparar directorio de entrada en HDFS",
+			Notes: "Crea " + hdfsInput + " si todavía no existe. La bandera -p evita que falle si ya estaba.",
+			Cmd:   p.HdfsCommand(),
+			Args:  []string{"dfs", "-mkdir", "-p", hdfsInput},
+		},
+		{
+			Title: "2 · Subir el dataset (" + dataset + ") a HDFS",
+			Notes: "Copia el archivo local al directorio recién creado. -f sobrescribe si ya estaba ahí desde una corrida anterior.",
+			Cmd:   p.HdfsCommand(),
+			Args:  []string{"dfs", "-put", "-f", filepath.Join(dir, dataset), hdfsInput + "/"},
+		},
+		{
+			Title: "3 · Borrar output anterior (idempotente)",
+			Notes: "Hadoop se niega a escribir sobre una carpeta de salida que ya existe. La borramos por si ejecutas el job más de una vez.",
+			Cmd:   p.HdfsCommand(),
+			Args:  []string{"dfs", "-rm", "-r", "-f", "-skipTrash", hdfsOutput},
+		},
+		{
+			Title: "4 · Ejecutar el job MapReduce vía Hadoop Streaming",
+			Notes: "Hadoop Streaming envía cada línea del input al stdin del mapper, y el stdout del mapper al stdin del reducer. -files copia los scripts a los nodos worker (en single-node los lee local).",
+			Cmd:   filepath.Join(p.Hadoop, "bin", hadoopScript()),
+			Args: []string{
+				"jar", streamingJar,
+				"-files", filepath.Join(dir, "mapper.py") + "," + filepath.Join(dir, "reducer.py"),
+				"-mapper", "python mapper.py",
+				"-reducer", "python reducer.py",
+				"-input", hdfsInput,
+				"-output", hdfsOutput,
+			},
+			PrintAs: "hadoop jar hadoop-streaming.jar \\\n" +
+				"  -files mapper.py,reducer.py \\\n" +
+				"  -mapper \"python mapper.py\" \\\n" +
+				"  -reducer \"python reducer.py\" \\\n" +
+				"  -input " + hdfsInput + " -output " + hdfsOutput,
+		},
+		{
+			Title: "5 · Top-20 palabras más frecuentes",
+			Notes: "Leemos la salida del reducer (part-00000), ordenamos por la columna 2 numérica descendente, y mostramos los 20 primeros tokens.",
+			Cmd:   bashBin,
+			Args:  []string{"-lc", p.HdfsCommand() + " dfs -cat " + hdfsOutput + "/part-00000 | sort -t$'\\t' -k2 -nr | head -20"},
+			Shell: true,
+			PrintAs: "hdfs dfs -cat " + hdfsOutput + "/part-00000 \\\n" +
+				"  | sort -t$'\\t' -k2 -nr | head -20",
+		},
+	}
+
+	return &Exercise{
+		ID:          id,
+		Title:       name + " — WordCount con Hadoop Streaming",
+		Description: "Cuenta cuántas veces aparece cada palabra en " + dataset + " usando un MapReduce clásico. El mapper emite (palabra, 1) por cada token; el reducer suma las repeticiones agrupadas por palabra (Hadoop ordena las claves automáticamente antes de pasarlas al reducer).",
+		Path:        dir,
+		Template:    "wordcount",
+		Requires:    []string{"hdfs_namenode", "hdfs_datanode"},
+		Files:       files,
+		Steps:       steps,
+	}
+}
+
+// findStreamingJar globs share/hadoop/tools/lib/hadoop-streaming-*.jar so
+// we don't hard-code the Hadoop version into the launcher.
+func findStreamingJar(p *paths.Paths) string {
+	pattern := filepath.Join(p.Hadoop, "share", "hadoop", "tools", "lib", "hadoop-streaming-*.jar")
+	matches, _ := filepath.Glob(pattern)
+	if len(matches) > 0 {
+		return matches[0]
+	}
+	// Best-effort fallback — the runner will error clearly if it doesn't exist.
+	return filepath.Join(p.Hadoop, "share", "hadoop", "tools", "lib", "hadoop-streaming.jar")
+}
+
+// hadoopScript returns the right wrapper name per OS.
+func hadoopScript() string {
+	if isWindows() {
+		return "hadoop.cmd"
+	}
+	return "hadoop"
+}
