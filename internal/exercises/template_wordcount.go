@@ -65,20 +65,18 @@ func wordCountExercise(p *paths.Paths, id, name, dir string, files []string) *Ex
 		},
 		{
 			Title: "4 · Ejecutar el job MapReduce vía Hadoop Streaming",
-			Notes: "Hadoop Streaming envía cada línea del input al stdin del mapper, y el stdout del mapper al stdin del reducer. -files copia los scripts a los nodos worker (en single-node los lee local).",
+			Notes: "Hadoop Streaming envía cada línea del input al stdin del mapper, y el stdout del mapper al stdin del reducer. En modo single-node (lo que tenemos) el 'worker' que corre el mapper es la misma máquina que hizo submit, así que basta con pasarle la ruta absoluta de los scripts a -mapper / -reducer; en cluster real usaríamos -files para distribuirlos.",
 			Cmd:   filepath.Join(p.Hadoop, "bin", hadoopScript()),
 			Args: []string{
 				"jar", streamingJar,
-				"-files", filepath.Join(dir, "mapper.py") + "," + filepath.Join(dir, "reducer.py"),
-				"-mapper", "python mapper.py",
-				"-reducer", "python reducer.py",
+				"-mapper", "python " + filepath.ToSlash(filepath.Join(dir, "mapper.py")),
+				"-reducer", "python " + filepath.ToSlash(filepath.Join(dir, "reducer.py")),
 				"-input", hdfsInput,
 				"-output", hdfsOutput,
 			},
 			PrintAs: "hadoop jar hadoop-streaming.jar \\\n" +
-				"  -files mapper.py,reducer.py \\\n" +
-				"  -mapper \"python mapper.py\" \\\n" +
-				"  -reducer \"python reducer.py\" \\\n" +
+				"  -mapper  \"python " + filepath.ToSlash(filepath.Join(dir, "mapper.py")) + "\" \\\n" +
+				"  -reducer \"python " + filepath.ToSlash(filepath.Join(dir, "reducer.py")) + "\" \\\n" +
 				"  -input " + hdfsInput + " -output " + hdfsOutput,
 		},
 		{
@@ -122,4 +120,27 @@ func hadoopScript() string {
 		return "hadoop.cmd"
 	}
 	return "hadoop"
+}
+
+// toFileURI turns an absolute local filesystem path into a file:/// URI
+// the way Hadoop's GenericOptionsParser expects:
+//
+//	Windows: D:\foo\bar.py   → file:///D:/foo/bar.py
+//	Unix:    /home/x/bar.py  → file:///home/x/bar.py
+//
+// Without this conversion the URI parser blows up at the first backslash
+// in a Windows path, treating "D:" as an opaque-scheme prefix:
+//
+//	java.net.URISyntaxException: Illegal character in opaque part at
+//	  index 2: D:\BDP\Ejercicio_01\mapper.py
+//
+// (The same fix lives in internal/setup/hadoop_xml.go as uriPath;
+// duplicated here to keep the templates self-contained and avoid an
+// import cycle with the setup package.)
+func toFileURI(absPath string) string {
+	p := strings.ReplaceAll(absPath, `\`, `/`)
+	if strings.HasPrefix(p, "/") {
+		return "file://" + p
+	}
+	return "file:///" + p
 }
