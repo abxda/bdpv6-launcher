@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -40,6 +41,12 @@ type App struct {
 
 	logSubsMu sync.Mutex
 	logSubs   map[string]int // service id → logsink sub id, so we can detach on shutdown
+
+	// shuttingDown gates the deferred-shutdown logic in beforeClose so the
+	// second close attempt (issued from runtime.Quit at the end of the
+	// graceful sequence) is allowed through instead of triggering a new
+	// async shutdown run.
+	shuttingDown atomic.Bool
 }
 
 const AppVersion = "0.2.0"
@@ -76,17 +83,58 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) domReady(ctx context.Context) {}
 
-// beforeClose is invoked when the user clicks the X button. We do NOT block
-// here — shutdown() handles the actual cleanup, and beforeClose is meant for
-// "show a confirmation prompt" use cases.
+// beforeClose intercepts the user clicking X. First call: returns
+// prevent=true and kicks off the async graceful shutdown in the background.
+// While that runs, the frontend renders a full-screen overlay so the user
+// knows the launcher is busy (and not frozen). When the shutdown finishes
+// it calls wailsruntime.Quit, which triggers a second beforeClose — this
+// time shuttingDown is already true, we return prevent=false, and the
+// window actually closes.
+//
+// This lets us spend 30-60 s safely shutting HDFS down (force-checkpoint
+// via dfsadmin before the inevitable hard kill) without confusing the user.
 func (a *App) beforeClose(ctx context.Context) (prevent bool) {
-	return false
+	if a.shuttingDown.Load() {
+		return false
+	}
+	a.shuttingDown.Store(true)
+	go a.runGracefulShutdown()
+	return true
 }
 
-func (a *App) shutdown(ctx context.Context) {
-	stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+// runGracefulShutdown is the async work kicked off from beforeClose. It
+// emits progress events to the frontend, walks every service through
+// GracefulPreStop (if implemented) + Stop, and finally calls Quit to let
+// the window close.
+func (a *App) runGracefulShutdown() {
+	wailsruntime.EventsEmit(a.ctx, "shutdown:start", map[string]any{
+		"total": len(a.registry.All()),
+	})
+
+	// 90 s top-level cap. Each individual service has its own internal
+	// timeouts (dfsadmin 20 s × 3 + Stop grace 15 s = ~75 s for the
+	// worst case which is NameNode).
+	stopCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	_ = a.registry.StopAll(stopCtx)
+
+	_ = a.registry.StopAllWithProgress(stopCtx, func(step, total int, name, phase string) {
+		wailsruntime.EventsEmit(a.ctx, "shutdown:progress", map[string]any{
+			"step":    step,
+			"total":   total,
+			"service": name,
+			"phase":   phase, // "pre-stop" or "stop"
+		})
+	})
+
+	wailsruntime.EventsEmit(a.ctx, "shutdown:done", nil)
+	wailsruntime.Quit(a.ctx)
+}
+
+// shutdown runs after the window has actually closed. By the time we get
+// here, runGracefulShutdown has already stopped every service. We just
+// flush the sinks (so the on-disk log files end cleanly) and persist
+// settings one last time.
+func (a *App) shutdown(ctx context.Context) {
 	for _, svc := range a.registry.All() {
 		if sink := svc.Logs(); sink != nil {
 			_ = sink.Close()

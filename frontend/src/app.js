@@ -350,6 +350,17 @@ function subscribeRuntimeEvents() {
         if (currentView === 'dashboard') renderDashboard(document.getElementById('content'));
     });
 
+    // Graceful shutdown overlay. shutdown:start fires once when the user
+    // clicks X; shutdown:progress fires per service step (with phase
+    // "pre-stop" for the dfsadmin checkpoint dance, "stop" for the actual
+    // taskkill); shutdown:done fires right before the window closes.
+    window.runtime.EventsOn('shutdown:start', (data) => showShutdownOverlay(data && data.total));
+    window.runtime.EventsOn('shutdown:progress', updateShutdownProgress);
+    window.runtime.EventsOn('shutdown:done', () => {
+        const msg = document.getElementById('shutdownMsg');
+        if (msg) msg.textContent = 'Listo. Cerrando ventana…';
+    });
+
     // One subscription per service for live log streaming.
     for (const svc of STATE.services) {
         const eventName = 'service:' + svc.id + ':log';
@@ -1202,4 +1213,42 @@ function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({
         '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
     }[c]));
+}
+
+/* ---------- Shutdown overlay --------------------------------------------- */
+function showShutdownOverlay(total) {
+    if (document.getElementById('shutdownOverlay')) return;
+    const o = document.createElement('div');
+    o.id = 'shutdownOverlay';
+    o.className = 'c-overlay';
+    o.innerHTML =
+        '<div class="c-overlay__box">' +
+            '<div class="c-spinner"></div>' +
+            '<h2 class="c-overlay__title">Cerrando servicios de forma segura</h2>' +
+            '<p class="c-overlay__msg" id="shutdownMsg">Iniciando secuencia de apagado…</p>' +
+            '<div class="c-progress c-overlay__progress">' +
+                '<div class="c-progress__bar" id="shutdownBar" style="width:0%"></div>' +
+            '</div>' +
+            '<p class="c-overlay__note">' +
+                'Esto fuerza un checkpoint de HDFS antes del kill para evitar corrupción de datos. ' +
+                'Es normal que tarde entre 30 y 60 segundos con HDFS activo.' +
+            '</p>' +
+        '</div>';
+    document.body.appendChild(o);
+    o.dataset.total = String(total || 5);
+}
+
+function updateShutdownProgress(data) {
+    const overlay = document.getElementById('shutdownOverlay');
+    if (!overlay) return;
+    const total = data.total || parseInt(overlay.dataset.total, 10) || 5;
+    const step = data.step || 0;
+    const pct = Math.min(100, Math.round((step / total) * 100));
+    const bar = document.getElementById('shutdownBar');
+    const msg = document.getElementById('shutdownMsg');
+    if (bar) bar.style.width = pct + '%';
+    if (msg) {
+        const verb = data.phase === 'pre-stop' ? 'Asegurando' : 'Deteniendo';
+        msg.textContent = verb + ' ' + (data.service || '?') + ' (' + step + ' / ' + total + ')…';
+    }
 }

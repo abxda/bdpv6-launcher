@@ -18,6 +18,20 @@ import (
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 )
 
+// GracefulStopper is an optional, opt-in capability a Service can implement
+// to perform pre-stop work that protects against corruption from a hard kill.
+// Registry.StopAll invokes GracefulPreStop (best-effort, errors logged but
+// not fatal) before calling Stop, so the subsequent taskkill /F finds the
+// on-disk state already in a recoverable shape.
+//
+// The poster child is HDFS NameNode: a forced checkpoint via
+//   hdfs dfsadmin -safemode enter / -saveNamespace / -safemode leave
+// writes VERSION + fsimage to disk so the hard kill no longer orphans
+// edits_inprogress with no fsimage to recover from.
+type GracefulStopper interface {
+	GracefulPreStop(ctx context.Context) error
+}
+
 // Service is the contract every BDP service implementation satisfies.
 // Implementations live in their own files (elasticsearch.go, kafka.go, ...).
 type Service interface {
@@ -130,12 +144,53 @@ func (r *Registry) SortedStatuses() []Status {
 
 // StopAll shuts down every registered service in reverse registration order
 // (e.g. Jupyter before HDFS so notebooks lose their session cleanly first).
-// Errors are collected but do not abort the loop.
+// Services that implement GracefulStopper get their pre-stop hook invoked
+// first; errors at any step are collected but never abort the loop — we
+// want every service to get its Stop call no matter what.
 func (r *Registry) StopAll(ctx context.Context) error {
 	all := r.All()
 	var errs []error
 	for i := len(all) - 1; i >= 0; i-- {
-		if err := all[i].Stop(ctx); err != nil {
+		svc := all[i]
+		if g, ok := svc.(GracefulStopper); ok {
+			if err := g.GracefulPreStop(ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if err := svc.Stop(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
+}
+
+// StopAllWithProgress is like StopAll but calls progress on each step so the
+// shutdown overlay can render a meaningful indicator. progress(step, total,
+// serviceName, phase) is invoked twice per service: once for "pre-stop"
+// (if GracefulStopper) and once for "stop". step is 1-indexed; total counts
+// only services (not phases), so the bar advances by 1/total per service.
+func (r *Registry) StopAllWithProgress(ctx context.Context, progress func(step, total int, name, phase string)) error {
+	all := r.All()
+	total := len(all)
+	var errs []error
+	for i := total - 1; i >= 0; i-- {
+		svc := all[i]
+		step := total - i
+		if g, ok := svc.(GracefulStopper); ok {
+			if progress != nil {
+				progress(step, total, svc.Name(), "pre-stop")
+			}
+			if err := g.GracefulPreStop(ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if progress != nil {
+			progress(step, total, svc.Name(), "stop")
+		}
+		if err := svc.Stop(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}

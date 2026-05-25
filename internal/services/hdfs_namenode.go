@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +67,72 @@ func (n *HDFSNameNode) Start(ctx context.Context) error {
 	n.startedAt = time.Now()
 	n.sink.Emit("INFO", fmt.Sprintf("NameNode arrancado con PID %d", proc.PID()))
 	return nil
+}
+
+// GracefulPreStop forces HDFS to checkpoint fsimage to disk before we hard-
+// kill the process. Without this, the JVM never runs its shutdown hooks and
+// you end up with a current/ dir holding edits_inprogress_N but no VERSION
+// and no fsimage — Hadoop's definition of corrupted.
+//
+// The sequence is the same one Hadoop docs recommend for a safe NameNode
+// shutdown:
+//
+//	hdfs dfsadmin -safemode enter      → stop accepting writes
+//	hdfs dfsadmin -saveNamespace       → flush fsimage to disk
+//	hdfs dfsadmin -safemode leave      → restore writes
+//
+// After this, the subsequent Stop's taskkill /F /T loses no data because
+// fsimage is already on disk. Each subcommand spawns its own JVM (~3-5 s
+// startup) so the whole dance is ~10-15 s. Best-effort: if any step fails
+// (NameNode not actually responsive, dfsadmin times out, …) we return the
+// error but the caller proceeds to Stop anyway.
+func (n *HDFSNameNode) GracefulPreStop(ctx context.Context) error {
+	n.mu.Lock()
+	proc := n.proc
+	n.mu.Unlock()
+	if proc == nil || !proc.Running() {
+		return nil
+	}
+	n.sink.Emit("INFO", "Forzando checkpoint de fsimage antes de detener…")
+
+	for _, args := range [][]string{
+		{"-safemode", "enter"},
+		{"-saveNamespace"},
+		{"-safemode", "leave"},
+	} {
+		if err := n.runDfsAdmin(ctx, args...); err != nil {
+			// Don't propagate: still want Stop to fire. The corruption
+			// detector + auto-cleanup in setup will rescue us on next run.
+			n.sink.Emit("WARN", "Paso fallido del checkpoint: "+err.Error())
+			return nil
+		}
+	}
+	n.sink.Emit("INFO", "Checkpoint de fsimage guardado en disco.")
+	return nil
+}
+
+// runDfsAdmin shells out to hdfs.cmd dfsadmin with a per-call 20 s timeout.
+// We capture combined output and stream every line into the namenode sink so
+// the user can watch the checkpoint progress in the diagnostic console.
+func (n *HDFSNameNode) runDfsAdmin(parent context.Context, args ...string) error {
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	defer cancel()
+
+	cmdArgs := append([]string{"dfsadmin"}, args...)
+	cmd := exec.CommandContext(ctx, n.p.HdfsCommand(), cmdArgs...)
+	cmd.Dir = n.p.Hadoop
+	cmd.Env = mergeOSEnvFor(javaEnv(n.p), map[string]string{
+		"HDFS_NAMENODE_USER": userOrDefault(),
+	})
+	cmd.SysProcAttr = hideWindowSysAttr()
+
+	out, err := cmd.CombinedOutput()
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if line != "" {
+			n.sink.Emit("INFO", "[dfsadmin "+strings.Join(args, " ")+"] "+line)
+		}
+	}
+	return err
 }
 
 func (n *HDFSNameNode) Stop(ctx context.Context) error {

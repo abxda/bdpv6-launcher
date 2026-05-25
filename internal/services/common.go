@@ -1,6 +1,9 @@
 package services
 
 import (
+	"os"
+	"strings"
+
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
 	"github.com/abxda/bdpv6-launcher/internal/paths"
 )
@@ -64,4 +67,38 @@ func trimCR(s string) string {
 		return s[:len(s)-1]
 	}
 	return s
+}
+
+// mergeOSEnvFor returns os.Environ() with the given overrides applied. Used
+// for one-shot helper commands (like dfsadmin) that don't go through
+// processctl.Spec.Env. Later occurrences win.
+func mergeOSEnvFor(maps ...map[string]string) []string {
+	merged := map[string]string{}
+	for _, m := range maps {
+		for k, v := range m {
+			merged[k] = v
+		}
+	}
+	out := []string{}
+	used := map[string]bool{}
+	for _, kv := range os.Environ() {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			out = append(out, kv)
+			continue
+		}
+		k := kv[:eq]
+		if v, ok := merged[k]; ok {
+			out = append(out, k+"="+v)
+			used[k] = true
+		} else {
+			out = append(out, kv)
+		}
+	}
+	for k, v := range merged {
+		if !used[k] {
+			out = append(out, k+"="+v)
+		}
+	}
+	return out
 }
