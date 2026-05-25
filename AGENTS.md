@@ -5,30 +5,51 @@ Aider, etc.) working on this repository. It is also useful for human
 contributors — but written tersely for an agent that can read code but
 hasn't been here before.
 
-The current author works on Windows. We need agents to be able to clone the
-repo on **macOS** and produce a working `BDPV6 Launcher.app` bundle, since
-the macOS build cannot be cross-compiled cleanly from Windows (Cgo + WKWebView
-require host-native tooling).
+The launcher is **fully cross-platform**: Windows (WebView2), macOS (WKWebView),
+and Linux (WebKit2GTK) all build from this same source. The current author
+works on Windows; we need agents to be able to produce working binaries
+on macOS and Linux too, since Cgo + the platform webview means cross-
+compilation from Windows is not viable.
+
+Platform-specific code is split via build tags (`//go:build windows` vs
+`//go:build darwin || linux`). On the Unix side, macOS and Linux share
+identical POSIX semantics (process groups, signals, `lsof`), so a single
+`_unix.go` file covers both.
 
 ---
 
 ## 0 — TL;DR for an agent picking this up cold
 
+### macOS (Apple Silicon or Intel)
+
 ```bash
-# macOS (Apple Silicon or Intel)
 git clone git@github.com:abxda/bdpv6-launcher.git
 cd bdpv6-launcher
-
-# Verify toolchain
 xcode-select -p                       # must print a path
 go version                            # need >= 1.23
-wails version                         # need 2.12.0
-
-# Build
+wails version                         # need v2.12.0
 wails build -platform darwin/universal -trimpath -clean
-
-# Output
 open build/bin                        # → BDPV6 Launcher.app
+```
+
+### Linux (Ubuntu / Debian)
+
+```bash
+sudo apt update && sudo apt install -y \
+    build-essential libgtk-3-dev libwebkit2gtk-4.0-dev pkg-config
+git clone git@github.com:abxda/bdpv6-launcher.git
+cd bdpv6-launcher
+go version                            # need >= 1.23
+wails version                         # need v2.12.0
+wails build -platform linux/amd64 -trimpath -clean
+./build/bin/bdpv6-launcher            # plain ELF binary
+```
+
+### Linux (Fedora / RHEL)
+
+```bash
+sudo dnf install -y gcc gtk3-devel webkit2gtk4.0-devel pkg-config
+# rest identical to Ubuntu
 ```
 
 If any of the verifications fail, follow Section 1 below before retrying.

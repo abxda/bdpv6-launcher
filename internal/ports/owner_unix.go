@@ -1,5 +1,5 @@
-//go:build darwin
-// +build darwin
+//go:build darwin || linux
+// +build darwin linux
 
 package ports
 
@@ -9,8 +9,11 @@ import (
 	"strings"
 )
 
-// WhoOwns uses `lsof -nP -iTCP:PORT -sTCP:LISTEN -F pcn` to identify the
-// listener. Output is line-prefixed: 'p' = pid, 'c' = command, 'n' = name.
+// WhoOwns uses `lsof -nP -iTCP:PORT -sTCP:LISTEN -F pc` to identify the
+// listener. Output is line-prefixed: 'p' = pid, 'c' = command. lsof exists
+// and accepts the same flags on both macOS and Linux. On Linux distros
+// where lsof isn't bundled (a few minimal images), the user can install
+// it with apt/dnf/pacman; we degrade to an empty Owner rather than crash.
 func WhoOwns(port int) Owner {
 	cmd := exec.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-F", "pc")
 	out, err := cmd.Output()
