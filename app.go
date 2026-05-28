@@ -91,12 +91,31 @@ type exerciseSession struct {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.state.Load()
+	a.healEnvironment()
 	a.bootstrapServices()
 	a.attachLogStreams()
 	a.applyAlwaysOnTop(a.state.Get().AlwaysOnTop)
 	sysinfo.Warm()
 	go a.statusTickLoop()
 	go a.sysinfoTickLoop()
+}
+
+// healEnvironment runs the platform-specific startup heal pass and surfaces
+// the result in the setup log. On macOS this restores Unix features that
+// exFAT / .zip-via-Archive-Utility strip (exec bits, python wrappers, the
+// libsqlite3.dylib alias, com.apple.quarantine on the distro tree) so the
+// student experience is "extract and launch" regardless of transport. The
+// implementation is in internal/paths/heal_*; on non-darwin hosts it's a
+// no-op. Errors are non-fatal — services try to start either way and the
+// user can re-run via the repair UI.
+func (a *App) healEnvironment() {
+	rep := a.paths.HealDarwin()
+	for _, line := range rep.Actions {
+		a.setupSink.Emit("INFO", "[heal] "+line)
+	}
+	for _, line := range rep.Errors {
+		a.setupSink.Emit("WARN", "[heal] "+line)
+	}
 }
 
 func (a *App) domReady(ctx context.Context) {}
