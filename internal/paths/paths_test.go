@@ -3,8 +3,32 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// TestUnwrapAppBundle verifies the macOS .app bundle unwrap: a binary at
+// <root>/<Name>.app/Contents/MacOS/<bin> must resolve its distro root to
+// <root> (the parent of the .app), not to Contents/MacOS/.
+func TestUnwrapAppBundle(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("bundle unwrap only applies on darwin")
+	}
+	root := filepath.FromSlash("/Volumes/Drive/BDPV5_macOS")
+	cases := map[string]string{
+		// Inside a .app bundle (note the space in the product name): unwrap.
+		filepath.Join(root, "BDPV6 Launcher.app", "Contents", "MacOS"): root,
+		// Plain binary sitting at the distro root (e.g. go test): unchanged.
+		root: root,
+		// A MacOS dir not inside Contents/*.app: unchanged.
+		filepath.Join(root, "MacOS"): filepath.Join(root, "MacOS"),
+	}
+	for in, want := range cases {
+		if got := unwrapAppBundle(in); got != want {
+			t.Errorf("unwrapAppBundle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
 
 func TestNamenodeStateOf(t *testing.T) {
 	tmp := t.TempDir()
