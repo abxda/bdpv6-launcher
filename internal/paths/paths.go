@@ -249,7 +249,7 @@ func executableDir() string {
 		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = resolved
 		}
-		return filepath.Dir(exe)
+		return unwrapAppBundle(filepath.Dir(exe))
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -261,4 +261,28 @@ func executableDir() string {
 func isDir(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.IsDir()
+}
+
+// unwrapAppBundle maps the directory containing the running binary to the
+// BDP distribution root. On macOS the launcher ships as a .app bundle, so the
+// binary lives at <root>/<Name>.app/Contents/MacOS/<bin> while the distro
+// folders (common_jdk/, hadoop/, …) are siblings of the .app. We unwrap the
+// three bundle levels (MacOS → Contents → <Name>.app) to land on <root>.
+// Without this every service path resolves inside Contents/MacOS/ and
+// fork/exec fails with "no such file or directory". On non-darwin hosts, or
+// when the binary is not inside a .app (e.g. `wails dev`, `go test`), the
+// directory is returned unchanged.
+func unwrapAppBundle(dir string) string {
+	if runtime.GOOS != "darwin" || filepath.Base(dir) != "MacOS" {
+		return dir
+	}
+	contents := filepath.Dir(dir)
+	if filepath.Base(contents) != "Contents" {
+		return dir
+	}
+	appDir := filepath.Dir(contents)
+	if filepath.Ext(appDir) != ".app" {
+		return dir
+	}
+	return filepath.Dir(appDir)
 }
