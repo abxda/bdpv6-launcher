@@ -37,7 +37,7 @@ function iconHTML(name) { return ICONS[name] || ICONS.info; }
 /* ---------- i18n ---------------------------------------------------------- */
 const STR = {
     es: {
-        'brand.subtitle':   'Launcher',
+        'brand.subtitle':   'Edición Portable',
         'nav.dashboard':    'Dashboard',
         'nav.services':     'Servicios',
         'nav.ports':        'Puertos',
@@ -176,7 +176,7 @@ const STR = {
         'version.line':           'v{0} · {1}/{2}',
     },
     en: {
-        'brand.subtitle':   'Launcher',
+        'brand.subtitle':   'Edición Portable',
         'nav.dashboard':    'Dashboard',
         'nav.services':     'Services',
         'nav.ports':        'Ports',
@@ -453,7 +453,8 @@ function refreshNavHighlight() {
 function renderVersionFooter() {
     const el = document.getElementById('versionInfo');
     if (STATE.envInfo && STATE.envInfo.appVersion) {
-        el.textContent = t('version.line', STATE.envInfo.appVersion, STATE.envInfo.os, STATE.envInfo.arch);
+        const line = t('version.line', STATE.envInfo.appVersion, STATE.envInfo.os, STATE.envInfo.arch);
+        el.innerHTML = esc(line) + '<br><span style="opacity:.7">Dr. Abel Coronado</span>';
     }
 }
 

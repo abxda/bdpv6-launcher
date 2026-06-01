@@ -15,7 +15,7 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:     "BDPV6 Launcher",
+		Title:     "Big Data Lab · Edición Portable",
 		Width:     1200,
 		Height:    800,
 		MinWidth:  960,
