@@ -1269,7 +1269,32 @@ function renderServices(root) {
 }
 
 async function startService(id) {
-    try { await window.go.main.App.StartService(id); } catch (e) { alert('Error: ' + e); }
+    try {
+        await window.go.main.App.StartService(id);
+    } catch (e) {
+        if (await handleStartError(e, id)) return; // manejado (reintentado)
+        alert('Error: ' + e);
+    }
+}
+
+// handleStartError intercepta el caso especial "la VM de Vagrant está usando
+// los puertos": en vez del error técnico, ofrece apagar el laboratorio Vagrant
+// y reintenta. Devuelve true si lo manejó.
+async function handleStartError(e, id) {
+    const msg = String(e);
+    if (msg.indexOf('VAGRANT_VM_RUNNING|') === -1) return false;
+    const human = msg.split('VAGRANT_VM_RUNNING|')[1] || msg;
+    const ok = confirm(human + '\n\n¿Apagar ahora el laboratorio Vagrant (limpio, tu trabajo se conserva) y continuar con el Portable?');
+    if (!ok) return true; // el usuario decidió no apagar; no mostramos error técnico
+    try {
+        await window.go.main.App.ShutdownVagrantPeer();
+        // reintenta el arranque tras liberar los puertos
+        await window.go.main.App.StartService(id);
+        return true;
+    } catch (e2) {
+        alert('No pude completar: ' + e2);
+        return true;
+    }
 }
 async function stopService(id) {
     try { await window.go.main.App.StopService(id); } catch (e) { alert('Error: ' + e); }

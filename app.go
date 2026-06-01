@@ -23,6 +23,7 @@ import (
 	"github.com/abxda/bdpv6-launcher/internal/setup"
 	"github.com/abxda/bdpv6-launcher/internal/state"
 	"github.com/abxda/bdpv6-launcher/internal/sysinfo"
+	"github.com/abxda/bdpv6-launcher/internal/vmpeer"
 )
 
 // App is the Wails-bound type. Methods exported (capitalised) become callable
@@ -442,6 +443,17 @@ func (a *App) preflightPorts(svc services.Service) error {
 		if name == "" {
 			name = "proceso desconocido"
 		}
+		// Caso especial: el ocupante es la VM de la Edición Vagrant. En vez del
+		// error técnico, damos un mensaje claro y accionable (la UI ofrece
+		// apagarla con el botón que llama a ShutdownVagrantPeer).
+		if vmpeer.OwnerIsVagrantVM(name) {
+			return fmt.Errorf(
+				"VAGRANT_VM_RUNNING|El puerto %d lo está usando tu laboratorio Vagrant (la máquina virtual). "+
+					"Las dos ediciones usan los mismos puertos y no pueden correr a la vez. "+
+					"Apaga la máquina virtual de Vagrant para usar el Portable.",
+				port,
+			)
+		}
 		return fmt.Errorf(
 			"puerto %d ya está ocupado por %s (PID %d). "+
 				"Abre el tab Puertos para liberarlo, o termínalo desde Administrador de tareas.",
@@ -449,6 +461,26 @@ func (a *App) preflightPorts(svc services.Service) error {
 		)
 	}
 	return nil
+}
+
+// VagrantVMRunning reporta si la VM de la Edición Vagrant está encendida
+// (ocupa los mismos puertos que el Portable). La UI lo usa para mostrar el
+// botón "Apagar laboratorio Vagrant".
+func (a *App) VagrantVMRunning() bool {
+	return vmpeer.Running()
+}
+
+// ShutdownVagrantPeer apaga limpiamente la VM de la Edición Vagrant (ACPI por
+// nombre), liberando los puertos para que el Portable pueda arrancar. No
+// necesita saber desde qué carpeta se levantó la VM.
+func (a *App) ShutdownVagrantPeer() error {
+	if !vmpeer.Running() {
+		return nil
+	}
+	if vmpeer.Shutdown(90 * time.Second) {
+		return nil
+	}
+	return fmt.Errorf("no confirmé el apagado de la máquina virtual a tiempo; inténtalo de nuevo o apágala desde VirtualBox")
 }
 
 // KillPortHolder terminates whichever process is currently bound to the
