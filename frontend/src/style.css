@@ -478,3 +478,11 @@ svg {
     background: linear-gradient(90deg, var(--color-success), var(--color-info));
     transition: width 300ms ease;
 }
+
+/* Sidebar agrupado en 2 capas (Preparación / Mi Laboratorio) — homologado con la Edición Vagrant */
+.c-navgroup {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--color-text-muted);
+    padding: var(--s-4) var(--s-4) var(--s-2);
+}
+.c-navgroup:first-child { padding-top: var(--s-2); }

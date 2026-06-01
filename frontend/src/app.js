@@ -38,6 +38,8 @@ function iconHTML(name) { return ICONS[name] || ICONS.info; }
 const STR = {
     es: {
         'brand.subtitle':   'Edición Portable',
+        'layer.lab':        'Mi laboratorio',
+        'layer.prep':       'Preparación',
         'nav.dashboard':    'Dashboard',
         'nav.services':     'Servicios',
         'nav.ports':        'Puertos',
@@ -177,6 +179,8 @@ const STR = {
     },
     en: {
         'brand.subtitle':   'Edición Portable',
+        'layer.lab':        'My lab',
+        'layer.prep':       'Setup',
         'nav.dashboard':    'Dashboard',
         'nav.services':     'Services',
         'nav.ports':        'Ports',
@@ -335,17 +339,22 @@ const STATE = {
 };
 
 /* ---------- View registry ------------------------------------------------- */
+// Dos capas homologadas con la Edición Vagrant:
+//   'prep' = Preparación (despliegue/configuración propia de cada edición)
+//   'lab'  = Mi Laboratorio (trabajo del alumno, idéntico entre ediciones)
+// El sidebar agrupa los VIEWS por su 'layer'. No cambia el contenido de cada
+// vista, solo cómo se agrupan en la navegación.
 const VIEWS = [
-    { id: 'dashboard', icon: 'layout',   render: renderDashboard, onLeave: null },
-    { id: 'wizard',    icon: 'cpu',      render: renderWizard,    onLeave: null },
-    { id: 'services',  icon: 'server',   render: renderServices,  onLeave: null },
-    { id: 'exercises', icon: 'book',     render: renderExercises, onLeave: null },
-    { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh },
-    { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null },
-    { id: 'hdfs',      icon: 'folder',   render: renderHDFS,      onLeave: null },
-    { id: 'repair',    icon: 'wrench',   render: renderRepair,    onLeave: null },
-    { id: 'notebooks', icon: 'book',     render: renderNotebooks, onLeave: null },
-    { id: 'settings',  icon: 'settings', render: renderSettings,  onLeave: null },
+    { id: 'dashboard', icon: 'layout',   render: renderDashboard, onLeave: null,            layer: 'lab'  },
+    { id: 'services',  icon: 'server',   render: renderServices,  onLeave: null,            layer: 'lab'  },
+    { id: 'exercises', icon: 'book',     render: renderExercises, onLeave: null,            layer: 'lab'  },
+    { id: 'hdfs',      icon: 'folder',   render: renderHDFS,      onLeave: null,            layer: 'lab'  },
+    { id: 'notebooks', icon: 'book',     render: renderNotebooks, onLeave: null,            layer: 'lab'  },
+    { id: 'consoles',  icon: 'terminal', render: renderConsoles,  onLeave: null,            layer: 'lab'  },
+    { id: 'ports',     icon: 'plug',     render: renderPorts,     onLeave: stopPortsRefresh, layer: 'lab' },
+    { id: 'wizard',    icon: 'cpu',      render: renderWizard,    onLeave: null,            layer: 'prep' },
+    { id: 'repair',    icon: 'wrench',   render: renderRepair,    onLeave: null,            layer: 'prep' },
+    { id: 'settings',  icon: 'settings', render: renderSettings,  onLeave: null,            layer: 'prep' },
 ];
 
 let currentView = 'dashboard';
@@ -433,20 +442,32 @@ function renderBrand() {
 function renderNav() {
     const nav = document.getElementById('nav');
     nav.innerHTML = '';
-    for (const v of VIEWS) {
-        if (v.hidden) continue;
-        const btn = document.createElement('button');
-        btn.className = 'c-sidebar__nav-item' + (v.id === currentView ? ' is-active' : '');
-        btn.innerHTML = iconHTML(v.icon) + '<span>' + t('nav.' + v.id) + '</span>';
-        btn.addEventListener('click', () => renderView(v.id));
-        nav.appendChild(btn);
+    // Agrupa los VIEWS por capa: primero Mi Laboratorio (el trabajo diario),
+    // luego Preparación (configuración). Homologado con la Edición Vagrant.
+    const groups = [
+        { layer: 'lab',  label: t('layer.lab')  },
+        { layer: 'prep', label: t('layer.prep') },
+    ];
+    for (const g of groups) {
+        const head = document.createElement('div');
+        head.className = 'c-navgroup';
+        head.textContent = g.label;
+        nav.appendChild(head);
+        for (const v of VIEWS) {
+            if (v.hidden || v.layer !== g.layer) continue;
+            const btn = document.createElement('button');
+            btn.className = 'c-sidebar__nav-item' + (v.id === currentView ? ' is-active' : '');
+            btn.dataset.viewId = v.id;
+            btn.innerHTML = iconHTML(v.icon) + '<span>' + t('nav.' + v.id) + '</span>';
+            btn.addEventListener('click', () => renderView(v.id));
+            nav.appendChild(btn);
+        }
     }
 }
 
 function refreshNavHighlight() {
-    const visible = VIEWS.filter(v => !v.hidden);
-    document.querySelectorAll('.c-sidebar__nav-item').forEach((el, i) => {
-        el.classList.toggle('is-active', visible[i] && visible[i].id === currentView);
+    document.querySelectorAll('.c-sidebar__nav-item').forEach(el => {
+        el.classList.toggle('is-active', el.dataset.viewId === currentView);
     });
 }
 
