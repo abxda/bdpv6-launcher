@@ -64,6 +64,12 @@ func NewApp() *App {
 	st := state.NewStore(p.StateFile)
 	setupSink := logsink.New("setup", p.Logs, 2000)
 	repairSink := logsink.New("repair", p.Logs, 2000)
+	// setup/repair are low-volume diagnostic channels the student (or an agent)
+	// may tail live. fsync each line so they're visible immediately even on
+	// exFAT, where unsynced writes stay invisible to other processes until the
+	// file handle closes. Service sinks stay unsynced (high volume).
+	setupSink.SyncEachLine(true)
+	repairSink.SyncEachLine(true)
 	setupOrc := setup.New(p, st, setupSink)
 	a := &App{
 		paths:           p,
