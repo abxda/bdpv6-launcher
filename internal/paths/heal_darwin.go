@@ -38,28 +38,48 @@ func (p *Paths) HealDarwin() HealReport {
 	return r
 }
 
-// healExecBits walks each service's bin tree and restores u+x when the
+// healExecBits restores u+x across each service's binary trees when the
 // canonical probe binary lost its exec bit (the symptom of an exFAT or
-// Windows-zip transport). The walk is skipped on healthy installs.
+// Windows-zip transport). Each service lists ALL trees that ship executables,
+// not just bin/: e.g. Elasticsearch bundles its own JDK under jdk/ and native
+// CLIs under modules/ + lib/ — chmod'ing only elasticsearch/bin leaves
+// es bundled `java` non-executable and ES fails to start. Coverage mirrors the
+// chmod sweep in bootstrap_mac.sh. The walk is skipped on healthy installs
+// (probe already executable), so this is cheap on a clean tar extract.
 func (p *Paths) healExecBits(r *HealReport) {
-	type probe struct{ tree, marker string }
+	type probe struct {
+		marker string   // if this canonical binary lost +x, the trees need heal
+		trees  []string // directories to chmod -R u+x
+	}
 	probes := []probe{
-		{p.CommonJDK, filepath.Join(p.CommonJDK, "bin", "java")},
-		{filepath.Join(p.Hadoop, "bin"), filepath.Join(p.Hadoop, "bin", "hdfs")},
-		{filepath.Join(p.Kafka, "bin"), filepath.Join(p.Kafka, "bin", "kafka-server-start.sh")},
-		{filepath.Join(p.Elastic, "bin"), filepath.Join(p.Elastic, "bin", "elasticsearch")},
-		{filepath.Join(p.Python, "bin"), filepath.Join(p.Python, "bin", "python3.10")},
-		{filepath.Join(p.Spark, "bin"), filepath.Join(p.Spark, "bin", "spark-submit")},
+		{filepath.Join(p.CommonJDK, "bin", "java"), []string{p.CommonJDK}},
+		{filepath.Join(p.Hadoop, "bin", "hdfs"), []string{
+			filepath.Join(p.Hadoop, "bin"), filepath.Join(p.Hadoop, "sbin"), filepath.Join(p.Hadoop, "libexec"),
+		}},
+		{filepath.Join(p.Kafka, "bin", "kafka-server-start.sh"), []string{filepath.Join(p.Kafka, "bin")}},
+		{filepath.Join(p.Elastic, "bin", "elasticsearch"), []string{
+			filepath.Join(p.Elastic, "bin"), filepath.Join(p.Elastic, "jdk"),
+			filepath.Join(p.Elastic, "modules"), filepath.Join(p.Elastic, "lib"),
+		}},
+		{filepath.Join(p.Python, "bin", "python3.10"), []string{filepath.Join(p.Python, "bin")}},
+		{filepath.Join(p.Spark, "bin", "spark-submit"), []string{
+			filepath.Join(p.Spark, "bin"), filepath.Join(p.Spark, "sbin"),
+		}},
 	}
 	for _, pr := range probes {
 		if !fileExists(pr.marker) || isExecutable(pr.marker) {
 			continue
 		}
-		if err := chmodExecTree(pr.tree); err != nil {
-			r.Errors = append(r.Errors, fmt.Sprintf("chmod %s: %v", pr.tree, err))
-			continue
+		for _, tree := range pr.trees {
+			if !isDir(tree) {
+				continue
+			}
+			if err := chmodExecTree(tree); err != nil {
+				r.Errors = append(r.Errors, fmt.Sprintf("chmod %s: %v", tree, err))
+				continue
+			}
+			r.Actions = append(r.Actions, "restored exec bits under "+tree)
 		}
-		r.Actions = append(r.Actions, "restored exec bits under "+pr.tree)
 	}
 }
 

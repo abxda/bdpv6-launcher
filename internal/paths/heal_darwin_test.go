@@ -30,6 +30,11 @@ func fakeDistro(t *testing.T) *Paths {
 	mk("hadoop/bin/hdfs", 0o644, "")
 	mk("kafka_kraft/bin/kafka-server-start.sh", 0o644, "")
 	mk("elasticsearch/bin/elasticsearch", 0o644, "")
+	// ES ships its own bundled JDK + native CLIs outside bin/. These must
+	// also be re-chmod'd, or `java` under jdk/ stays non-exec and ES won't
+	// start. The exec-bit heal keys off elasticsearch/bin/elasticsearch.
+	mk("elasticsearch/jdk/Contents/Home/bin/java", 0o644, "")
+	mk("elasticsearch/modules/x-pack-ml/platform/darwin-aarch64/bin/pytorch_inference", 0o644, "")
 	// python3.10 must already be executable for the wrapper heal to fire
 	// — that's the real-world state (chmod survives once set; the wrapper
 	// files themselves are what the exFAT copy drops).
@@ -80,6 +85,10 @@ func TestHeal_FreshlyExtractedFromExFAT(t *testing.T) {
 		filepath.Join(p.Hadoop, "bin", "hdfs"),
 		filepath.Join(p.Kafka, "bin", "kafka-server-start.sh"),
 		filepath.Join(p.Elastic, "bin", "elasticsearch"),
+		// ES bundled JDK + native module CLI must be healed too (the gap
+		// found testing ES startup from exFAT).
+		filepath.Join(p.Elastic, "jdk", "Contents", "Home", "bin", "java"),
+		filepath.Join(p.Elastic, "modules", "x-pack-ml", "platform", "darwin-aarch64", "bin", "pytorch_inference"),
 		filepath.Join(p.Spark, "bin", "spark-submit"),
 	} {
 		fi, err := os.Stat(bin)

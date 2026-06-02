@@ -40,9 +40,20 @@ type Sink struct {
 	nextSub int
 	closed  bool
 
-	fileMu sync.Mutex
-	file   *os.File
+	fileMu   sync.Mutex
+	file     *os.File
+	syncEach bool // fsync after every line (low-volume diagnostic sinks only)
 }
+
+// SyncEachLine makes the sink fsync its log file after every written line.
+// Enable it ONLY for low-volume diagnostic channels (setup, repair): on exFAT
+// volumes macOS buffers unsynced writes, so another process (`cat`, a student
+// tailing the file) sees an empty file until the launcher exits and the handle
+// is closed. fsync makes each line durable and immediately visible. Do NOT
+// enable on high-volume service sinks (hdfs/kafka/es): an fsync per line to a
+// slow USB stick would throttle the producer. Call once, right after New,
+// before any Emit.
+func (s *Sink) SyncEachLine(v bool) { s.syncEach = v }
 
 // New creates a Sink that retains the last `capacity` lines and tails output
 // to <logsDir>/<id>.log (logsDir is created if it does not exist).
@@ -127,6 +138,9 @@ func (s *Sink) publish(ln Line) {
 	if s.file != nil {
 		s.fileMu.Lock()
 		_, _ = s.file.WriteString(formatForFile(ln) + "\n")
+		if s.syncEach {
+			_ = s.file.Sync()
+		}
 		s.fileMu.Unlock()
 	}
 
