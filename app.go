@@ -57,7 +57,10 @@ type App struct {
 	shuttingDown atomic.Bool
 }
 
-const AppVersion = "0.2.0"
+// AppVersion es la versión del launcher. Es var (no const) para poder
+// sobreescribirla con -ldflags "-X main.AppVersion=..." (útil para probar la
+// auto-actualización simulando una versión más vieja).
+var AppVersion = "0.2.1"
 
 func NewApp() *App {
 	p := paths.Detect()
@@ -98,6 +101,12 @@ type exerciseSession struct {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.state.Load()
+	// Auto-actualización: si hay un launcher más nuevo publicado, se baja, se
+	// reemplaza y relanza ANTES de arrancar nada. Solo se mueve el exe (~12 MB),
+	// nunca el stack de 2.5 GB.
+	if a.checkSelfUpdate() {
+		return
+	}
 	a.healEnvironment()
 	a.bootstrapServices()
 	a.attachLogStreams()

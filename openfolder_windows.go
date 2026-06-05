@@ -2,18 +2,13 @@
 
 package main
 
-import (
-	"os/exec"
-	"syscall"
-)
+import "os/exec"
 
-// openFolder abre una carpeta en el Explorador de Windows SIN abrir una ventana
-// de consola (HideWindow), consistente con el resto del launcher. explorer.exe
-// devuelve códigos de salida no-cero aun con éxito, así que no tratamos el
-// error de Start como fallo.
+// openFolder abre una carpeta en el Explorador de Windows.
+// OJO: NO uses HideWindow/CREATE_NO_WINDOW con explorer.exe — esa bandera impide
+// que el Explorador abra la ventana. explorer es app GUI, no abre consola, así
+// que no hay nada que ocultar. Devuelve exit-code no-cero aun con éxito, por eso
+// Start (no Run) y solo propagamos el fallo de lanzar el proceso.
 func openFolder(path string) error {
-	cmd := exec.Command("explorer", path)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	_ = cmd.Start()
-	return nil
+	return exec.Command("explorer", path).Start()
 }
