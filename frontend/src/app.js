@@ -158,6 +158,9 @@ const STR = {
         'notebooks.empty':        'No hay notebooks en la carpeta. Coloca archivos .ipynb dentro de notebooks/.',
         'notebooks.open':         'Abrir',
         'notebooks.openFolder':   'Abrir carpeta',
+        'notebooks.smoke':        'Cuaderno de prueba',
+        'notebooks.smokeBusy':    'Descargando…',
+        'notebooks.smokeTitle':   'Descarga el cuaderno de prueba (TestGlobalBigData) a tu carpeta de notebooks',
         'notebooks.needsJupyter': 'Jupyter no está corriendo. Inícialo desde la pestaña Servicios.',
         'notebooks.col.name':     'Archivo',
         'notebooks.col.size':     'Tamaño',
@@ -300,6 +303,9 @@ const STR = {
         'notebooks.empty':        'No notebooks in the folder. Drop .ipynb files inside notebooks/.',
         'notebooks.open':         'Open',
         'notebooks.openFolder':   'Open folder',
+        'notebooks.smoke':        'Test notebook',
+        'notebooks.smokeBusy':    'Downloading…',
+        'notebooks.smokeTitle':   'Download the test notebook (TestGlobalBigData) to your notebooks folder',
         'notebooks.needsJupyter': 'Jupyter is not running. Start it from the Services tab.',
         'notebooks.col.name':     'File',
         'notebooks.col.size':     'Size',
@@ -866,10 +872,22 @@ function humanSize(bytes) {
 /* ---------- Notebooks tab ------------------------------------------------- */
 async function renderNotebooks(root) {
     document.getElementById('viewActions').innerHTML =
-        '<button class="c-btn" id="actNbFolder">' + iconHTML('folder') + ' ' + t('notebooks.openFolder') + '</button>';
+        '<button class="c-btn" id="actNbFolder">' + iconHTML('folder') + ' ' + t('notebooks.openFolder') + '</button>' +
+        '<button class="c-btn" id="actNbSmoke" title="' + t('notebooks.smokeTitle') + '">' + iconHTML('book') + ' ' + t('notebooks.smoke') + '</button>';
     document.getElementById('actNbFolder').addEventListener('click', async () => {
         try { await window.go.main.App.OpenNotebooksFolder(); }
         catch (e) { alert('Error: ' + e); }
+    });
+    document.getElementById('actNbSmoke').addEventListener('click', async () => {
+        const b = document.getElementById('actNbSmoke');
+        b.disabled = true; b.innerHTML = iconHTML('book') + ' ' + t('notebooks.smokeBusy');
+        try {
+            await window.go.main.App.DownloadSmokeTest();
+            await renderNotebooks(root); // refresca la lista; ya aparece el cuaderno
+        } catch (e) {
+            alert('Error: ' + e);
+            b.disabled = false; b.innerHTML = iconHTML('book') + ' ' + t('notebooks.smoke');
+        }
     });
 
     let files = [];

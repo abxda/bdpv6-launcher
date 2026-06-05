@@ -317,3 +317,36 @@ outside the scope of the task, mention it explicitly.
 ```
 
 Welcome aboard — when in doubt, read `docs/PLAN.md` for the full design.
+
+---
+
+## Publishing & self-update (READ BEFORE RELEASING)
+
+This launcher ships **inside** the ~2.7 GB Portable `.tar.gz` on Hugging Face only
+as a **seed**. Do **NOT** re-upload 2.7 GB to ship a launcher change — use the
+**self-update** path (`selfupdate.go`), which costs ~12 MB.
+
+How self-update works (`checkSelfUpdate()` runs at `startup`, before services):
+1. Fetches `launchers/bdpv6-launcher-latest-<os>-<arch>.json` from the HF dataset
+   `abxda/bdp-lab` (descriptor: `{version, sha256, url}`).
+2. If `descriptor.version != AppVersion`, downloads the exe at `url`, verifies its
+   **SHA-256**, swaps itself (`exe → .old`, `new → exe` — Windows allows renaming a
+   running exe), relaunches and quits. The heavy stack is never re-downloaded.
+
+To cut a launcher release:
+1. **Bump `var AppVersion` in `app.go`.** The published descriptor MUST declare the
+   **same** version, or clients won't update (or loop).
+2. `wails build -platform windows/amd64 -skipbindings`.
+3. Upload `build/bin/bdpv6-launcher.exe` → `launchers/bdpv6-launcher-windows-amd64.exe`;
+   verify its HF `oid` == local sha256.
+4. Update `launchers/bdpv6-launcher-latest-windows-amd64.json` with the new
+   `version`+`sha256` (upload the exe FIRST, descriptor AFTER).
+
+Full step-by-step (commands, verification, anti-clobber, the cheap-vs-expensive
+matrix) lives in the course runbook **`Curso_BDP/PUBLICAR_Y_ACTUALIZAR.md` §3**
+(and §5 for when the heavy stack itself must be republished).
+
+> Known gap: only the **windows-amd64** descriptor/exe exist today. Apple Silicon
+> Portable has no auto-update yet — publish `launchers/bdpv6-launcher-{macos-arm64.exe,
+> latest-macos-arm64.json}` to enable it (the code already builds the URL from
+> `runtime.GOOS/GOARCH`).

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -60,7 +61,7 @@ type App struct {
 // AppVersion es la versión del launcher. Es var (no const) para poder
 // sobreescribirla con -ldflags "-X main.AppVersion=..." (útil para probar la
 // auto-actualización simulando una versión más vieja).
-var AppVersion = "0.2.1"
+var AppVersion = "0.2.2"
 
 func NewApp() *App {
 	p := paths.Detect()
@@ -902,4 +903,25 @@ func (a *App) OpenNotebook(name string) error {
 // en el explorador de archivos del SO. No requiere que Jupyter esté corriendo.
 func (a *App) OpenNotebooksFolder() error {
 	return openFolder(a.paths.Notebooks)
+}
+
+// smokeURL es el cuaderno de prueba (TestGlobalBigData). El Portable corre
+// Spark 3.4 / Scala 2.12, así que usamos la variante portable/ (la container/
+// va con Spark 4.0). Homologa el botón con los launchers de Podman y Vagrant.
+const smokeURL = "https://huggingface.co/datasets/abxda/bdp-lab/resolve/main/cuadernos/semana_2/portable/TestGlobalBigData.ipynb"
+
+// DownloadSmokeTest baja el cuaderno de prueba a la carpeta de notebooks (la que
+// sirve Jupyter), listo para abrirse desde la pestaña Notebooks y ejecutarse de
+// arriba a abajo. Reusa downloadVerified (selfupdate.go) con SHA vacío = sin
+// verificación de hash (el cuaderno puede cambiar entre semanas). Devuelve la
+// ruta donde quedó guardado.
+func (a *App) DownloadSmokeTest() (string, error) {
+	dest := filepath.Join(a.paths.Notebooks, "TestGlobalBigData.ipynb")
+	a.setupSink.Emit("INFO", "Descargando el cuaderno de prueba (TestGlobalBigData)…")
+	if err := downloadVerified(smokeURL, dest, ""); err != nil {
+		a.setupSink.Emit("ERROR", "No pude descargar el cuaderno: "+err.Error())
+		return "", err
+	}
+	a.setupSink.Emit("INFO", "✓ Cuaderno guardado en tu carpeta de notebooks. Ábrelo desde la pestaña Notebooks y ejecútalo de arriba a abajo.")
+	return dest, nil
 }
