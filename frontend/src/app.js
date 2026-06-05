@@ -87,6 +87,7 @@ const STR = {
         'dashboard.services':     'Servicios',
         'services.startAll':      'Iniciar TODO',
         'services.stopAll':       'Detener TODO',
+        'services.unavailable':   'No pude cargar la lista de servicios. Reinicia el launcher; si persiste, usa la pestaña Reparar.',
         'services.start':         'Iniciar',
         'services.stop':          'Detener',
         'services.logs':          'Consola',
@@ -232,6 +233,7 @@ const STR = {
         'dashboard.services':     'Services',
         'services.startAll':      'Start ALL',
         'services.stopAll':       'Stop ALL',
+        'services.unavailable':   'Could not load the services list. Restart the launcher; if it persists, use the Repair tab.',
         'services.start':         'Start',
         'services.stop':          'Stop',
         'services.logs':          'Console',
@@ -1244,7 +1246,7 @@ function appendRepairLine(line) {
 }
 
 /* ---------- Services tab -------------------------------------------------- */
-function renderServices(root) {
+async function renderServices(root) {
     // Header actions
     document.getElementById('viewActions').innerHTML =
         '<button class="c-btn c-btn--primary" id="actStartAll">' + iconHTML('play') + ' ' + t('services.startAll') + '</button>' +
@@ -1252,8 +1254,15 @@ function renderServices(root) {
     document.getElementById('actStartAll').addEventListener('click', startAll);
     document.getElementById('actStopAll').addEventListener('click', stopAll);
 
+    // Auto-cura: si la lista llegó vacía (p.ej. la UI cargó antes de que el
+    // backend registrara los servicios), la volvemos a pedir aquí en vez de
+    // mostrar un placeholder. La lista es estática (5 servicios), así que esto
+    // es barato y deja el tab siempre correcto.
     if (!STATE.services.length) {
-        root.innerHTML = '<div class="c-placeholder">' + iconHTML('info') + '<br/>' + t('placeholder.upcoming') + '</div>';
+        try { STATE.services = await window.go.main.App.ListServices() || []; } catch (e) {}
+    }
+    if (!STATE.services.length) {
+        root.innerHTML = '<div class="c-placeholder">' + iconHTML('info') + '<br/>' + t('services.unavailable') + '</div>';
         return;
     }
 

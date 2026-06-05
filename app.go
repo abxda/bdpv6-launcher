@@ -61,7 +61,7 @@ type App struct {
 // AppVersion es la versión del launcher. Es var (no const) para poder
 // sobreescribirla con -ldflags "-X main.AppVersion=..." (útil para probar la
 // auto-actualización simulando una versión más vieja).
-var AppVersion = "0.2.2"
+var AppVersion = "0.2.3"
 
 func NewApp() *App {
 	p := paths.Detect()
@@ -102,6 +102,11 @@ type exerciseSession struct {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = a.state.Load()
+	// Registramos los servicios PRIMERO: es instantáneo y sin red. Así la UI, que
+	// pide ListServices() al cargar, NUNCA los ve vacíos aunque el chequeo de
+	// auto-actualización (abajo) tarde por la red. Sin esto, el tab Servicios salía
+	// vacío tras el primer arranque (la UI cargaba antes de registrarse los servicios).
+	a.bootstrapServices()
 	// Auto-actualización: si hay un launcher más nuevo publicado, se baja, se
 	// reemplaza y relanza ANTES de arrancar nada. Solo se mueve el exe (~12 MB),
 	// nunca el stack de 2.5 GB.
@@ -109,7 +114,6 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	a.healEnvironment()
-	a.bootstrapServices()
 	a.attachLogStreams()
 	a.applyAlwaysOnTop(a.state.Get().AlwaysOnTop)
 	sysinfo.Warm()
