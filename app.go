@@ -888,3 +888,9 @@ func (a *App) OpenNotebook(name string) error {
 	wailsruntime.BrowserOpenURL(a.ctx, u.String())
 	return nil
 }
+
+// OpenNotebooksFolder abre la carpeta de notebooks (la misma que usa Jupyter)
+// en el explorador de archivos del SO. No requiere que Jupyter esté corriendo.
+func (a *App) OpenNotebooksFolder() error {
+	return openFolder(a.paths.Notebooks)
+}

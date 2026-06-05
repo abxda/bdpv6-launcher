@@ -157,6 +157,7 @@ const STR = {
         'hdfs.empty':             '(directorio vacío)',
         'notebooks.empty':        'No hay notebooks en la carpeta. Coloca archivos .ipynb dentro de notebooks/.',
         'notebooks.open':         'Abrir',
+        'notebooks.openFolder':   'Abrir carpeta',
         'notebooks.needsJupyter': 'Jupyter no está corriendo. Inícialo desde la pestaña Servicios.',
         'notebooks.col.name':     'Archivo',
         'notebooks.col.size':     'Tamaño',
@@ -298,6 +299,7 @@ const STR = {
         'hdfs.empty':             '(empty directory)',
         'notebooks.empty':        'No notebooks in the folder. Drop .ipynb files inside notebooks/.',
         'notebooks.open':         'Open',
+        'notebooks.openFolder':   'Open folder',
         'notebooks.needsJupyter': 'Jupyter is not running. Start it from the Services tab.',
         'notebooks.col.name':     'File',
         'notebooks.col.size':     'Size',
@@ -863,7 +865,12 @@ function humanSize(bytes) {
 
 /* ---------- Notebooks tab ------------------------------------------------- */
 async function renderNotebooks(root) {
-    document.getElementById('viewActions').innerHTML = '';
+    document.getElementById('viewActions').innerHTML =
+        '<button class="c-btn" id="actNbFolder">' + iconHTML('folder') + ' ' + t('notebooks.openFolder') + '</button>';
+    document.getElementById('actNbFolder').addEventListener('click', async () => {
+        try { await window.go.main.App.OpenNotebooksFolder(); }
+        catch (e) { alert('Error: ' + e); }
+    });
 
     let files = [];
     try { files = await window.go.main.App.ListNotebooks() || []; } catch (e) {}
