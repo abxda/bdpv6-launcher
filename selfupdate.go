@@ -123,6 +123,15 @@ func downloadVerified(url, dest, wantSHA string) error {
 	if wantSHA != "" && !strings.EqualFold(got, wantSHA) {
 		return fmt.Errorf("SHA-256 no coincide (esperado %s, obtenido %s)", wantSHA, got)
 	}
+	// El binario se baja con os.Create (modo 0644): en Unix queda SIN bit +x y
+	// tras el swap el launcher no es ejecutable (relaunch falla con "permission
+	// denied"). En Windows el bit de ejecución no aplica. Por eso, en no-Windows,
+	// le devolvemos permisos de ejecución al binario auto-actualizado.
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dest, 0o755); err != nil {
+			return fmt.Errorf("no pude marcar ejecutable el binario nuevo: %w", err)
+		}
+	}
 	return nil
 }
 
