@@ -2,6 +2,7 @@ package services
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
@@ -19,12 +20,23 @@ func javaEnv(p *paths.Paths) map[string]string {
 }
 
 // jupyterEnv extends javaEnv with PySpark hooks so notebooks that import
-// pyspark.sql can find the embedded Python and the bundled Spark.
+// pyspark.sql can find the embedded Python and the bundled Spark. Además
+// antepone al PATH los bin del stack portable (hadoop, spark, jdk) para que las
+// TERMINALES que JupyterLab abre (que heredan este entorno) reconozcan los
+// comandos `hdfs`, `hadoop`, `spark-submit` y `java` por nombre — sin esto, el
+// binario existe en hadoop/bin pero no está en el PATH del terminal.
 func jupyterEnv(p *paths.Paths) map[string]string {
 	env := javaEnv(p)
 	env["SPARK_HOME"] = p.Spark
 	env["PYSPARK_PYTHON"] = p.PythonBinary()
 	env["PYSPARK_DRIVER_PYTHON"] = p.PythonBinary()
+	sep := string(os.PathListSeparator)
+	binDirs := strings.Join([]string{
+		filepath.Join(p.Hadoop, "bin"),
+		filepath.Join(p.Spark, "bin"),
+		filepath.Join(p.CommonJDK, "bin"),
+	}, sep)
+	env["PATH"] = binDirs + sep + os.Getenv("PATH")
 	return env
 }
 

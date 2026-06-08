@@ -61,7 +61,7 @@ type App struct {
 // AppVersion es la versión del launcher. Es var (no const) para poder
 // sobreescribirla con -ldflags "-X main.AppVersion=..." (útil para probar la
 // auto-actualización simulando una versión más vieja).
-var AppVersion = "0.2.3"
+var AppVersion = "0.2.4"
 
 func NewApp() *App {
 	p := paths.Detect()
