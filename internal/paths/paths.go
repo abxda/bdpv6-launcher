@@ -10,7 +10,9 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strings"
 )
 
 // Paths is the immutable, fully resolved layout.
@@ -238,6 +240,41 @@ func (p *Paths) CoreSiteXML() string {
 }
 func (p *Paths) HdfsSiteXML() string {
 	return filepath.Join(p.HadoopConf, "hdfs-site.xml")
+}
+
+// hadoopIdentRe matches the active 'set HADOOP_IDENT_STRING=...' line in
+// hadoop-env.cmd (NOT the @rem-commented one), without consuming the trailing
+// CRLF so we preserve Windows line endings on rewrite.
+var hadoopIdentRe = regexp.MustCompile(`(?mi)^[ \t]*set HADOOP_IDENT_STRING=[^\r\n]*`)
+
+// EnsureHadoopIdentString fija HADOOP_IDENT_STRING en hadoop-env.cmd a un valor
+// SIN espacios ("bdp"). Por defecto Hadoop usa %USERNAME%; si el usuario de
+// Windows tiene espacios ("Juan PC"), hadoop-config.cmd construye
+// -Dhadoop.id.str=Juan PC SIN comillas, Java parte el espacio y toma "PC" como
+// clase principal -> "Could not find or load main class PC", y el formateo del
+// NameNode falla en silencio. Un valor fijo sin espacios elimina el problema
+// para CUALQUIER nombre de usuario. Idempotente: solo reescribe si hace falta.
+// Si el archivo no existe (no es Windows), es un no-op silencioso.
+func (p *Paths) EnsureHadoopIdentString() (bool, error) {
+	envFile := filepath.Join(p.HadoopConf, "hadoop-env.cmd")
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if strings.Contains(string(data), "set HADOOP_IDENT_STRING=bdp") {
+		return false, nil // ya parcheado
+	}
+	if !hadoopIdentRe.Match(data) {
+		return false, nil // no está la línea esperada; no tocamos nada
+	}
+	patched := hadoopIdentRe.ReplaceAll(data, []byte("set HADOOP_IDENT_STRING=bdp"))
+	if err := os.WriteFile(envFile, patched, 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // --- internals ---

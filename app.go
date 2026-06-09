@@ -61,7 +61,7 @@ type App struct {
 // AppVersion es la versión del launcher. Es var (no const) para poder
 // sobreescribirla con -ldflags "-X main.AppVersion=..." (útil para probar la
 // auto-actualización simulando una versión más vieja).
-var AppVersion = "0.2.5"
+var AppVersion = "0.2.6"
 
 func NewApp() *App {
 	p := paths.Detect()
@@ -136,6 +136,22 @@ func (a *App) healEnvironment() {
 	}
 	for _, line := range rep.Errors {
 		a.setupSink.Emit("WARN", "[heal] "+line)
+	}
+
+	// Windows: Hadoop se rompe con ESPACIOS. (1) HADOOP_IDENT_STRING por defecto
+	// es %USERNAME%; si el usuario tiene espacios ("Juan PC"), el formateo del
+	// NameNode truena con "Could not find or load main class PC". Lo fijamos a
+	// 'bdp'. (2) Si la RUTA del laboratorio tiene espacios, los .cmd de Hadoop
+	// (que no entrecomillan %HADOOP_HOME%) fallan con "'C:\Mi' no se reconoce
+	// como un comando"; eso no se puede parchear en Hadoop, así que avisamos claro.
+	if changed, err := a.paths.EnsureHadoopIdentString(); err != nil {
+		a.setupSink.Emit("WARN", "[heal] no pude normalizar HADOOP_IDENT_STRING: "+err.Error())
+	} else if changed {
+		a.setupSink.Emit("INFO", "[heal] HADOOP_IDENT_STRING fijado a 'bdp' (evita el fallo con nombres de usuario con espacios)")
+	}
+	if strings.ContainsRune(a.paths.ScriptDir, ' ') {
+		a.setupSink.Emit("WARN", "[heal] ⚠ El laboratorio está en una ruta CON ESPACIOS: "+a.paths.ScriptDir)
+		a.setupSink.Emit("WARN", "[heal] ⚠ Hadoop NO funciona con espacios en la ruta. Mueve la carpeta del laboratorio a una ruta corta SIN espacios (por ejemplo C:\\BDP) y vuelve a abrir.")
 	}
 }
 
