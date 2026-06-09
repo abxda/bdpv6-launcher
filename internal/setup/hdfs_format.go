@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,11 +53,49 @@ func (o *Orchestrator) runHDFS(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("hdfs format start: %w", err)
 	}
-	go streamLines(stdout, func(s string) { o.sink.Emit("INFO", s) })
-	go streamLines(stderr, func(s string) { o.sink.Emit("INFO", s) })
 
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("hdfs format wait: %w", err)
+	// En Windows el .cmd de Hadoop a veces sale con código 0 AUNQUE el java
+	// interno falle (p.ej. -Dhadoop.id.str con ESPACIOS -> "Could not find or
+	// load main class PC"), por eso el exit code no basta. Detectamos el fallo de
+	// dos formas: (1) escaneando la salida por la firma del error de Java, y
+	// (2) verificando el RESULTADO (que el formateo haya creado current/VERSION).
+	var mu sync.Mutex
+	fatal := ""
+	detect := func(s string) {
+		low := strings.ToLower(s)
+		if strings.Contains(low, "could not find or load main class") ||
+			strings.Contains(low, "classnotfoundexception") ||
+			strings.Contains(low, "no se ha encontrado o cargado la clase") {
+			mu.Lock()
+			if fatal == "" {
+				fatal = strings.TrimSpace(s)
+			}
+			mu.Unlock()
+		}
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); streamLines(stdout, func(s string) { o.sink.Emit("INFO", s); detect(s) }) }()
+	go func() { defer wg.Done(); streamLines(stderr, func(s string) { o.sink.Emit("INFO", s); detect(s) }) }()
+
+	werr := cmd.Wait()
+	wg.Wait() // asegura que leímos TODA la salida antes de juzgar el resultado
+
+	if werr != nil {
+		return fmt.Errorf("hdfs format wait: %w", werr)
+	}
+	mu.Lock()
+	f := fatal
+	mu.Unlock()
+	if f != "" || !o.p.NamenodeFormatted() {
+		msg := "el formateo de HDFS FALLÓ (el NameNode no quedó formateado)"
+		if f != "" {
+			msg += " — Java: " + f
+		}
+		msg += ". Causa típica en Windows: ESPACIOS en el nombre de usuario o en la ruta del " +
+			"laboratorio. Cierra y reabre el launcher (se auto-actualiza con el arreglo) y usa una " +
+			"ruta SIN espacios, por ejemplo C:\\BDP."
+		return fmt.Errorf("%s", msg)
 	}
 	return nil
 }
