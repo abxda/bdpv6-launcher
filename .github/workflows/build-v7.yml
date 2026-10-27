@@ -33,16 +33,19 @@ jobs:
             wails: windows/amd64
             tags: ""
             launcher: build/bin/bdpv6-launcher.exe
+            launcher_bin: build/bin/bdpv6-launcher.exe
           - os: ubuntu-24.04
             platform: linux-64
             wails: linux/amd64
             tags: "-tags webkit2_41"
             launcher: build/bin/bdpv6-launcher
+            launcher_bin: build/bin/bdpv6-launcher
           - os: macos-14
             platform: osx-arm64
             wails: darwin/arm64
             tags: ""
             launcher: "build/bin/BDPV6 Launcher.app"
+            launcher_bin: "build/bin/BDPV6 Launcher.app/Contents/MacOS/*"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
@@ -95,7 +98,7 @@ jobs:
         with:
           subject-path: |
             dist/bdp-v7-portable-*.tar.gz
-            ${{ matrix.launcher }}
+            ${{ matrix.launcher_bin }}
 
       - name: Publicar en Hugging Face (v7/)
         if: github.event_name == 'workflow_dispatch' && inputs.publish
