@@ -69,7 +69,8 @@ def main():
     from huggingface_hub import HfApi
     tmp = Path("manifest-v7.txt")
     tmp.write_text(text, encoding="utf-8")
-    HfApi(token=os.environ["HF_TOKEN"]).upload_file(path_or_fileobj=str(tmp), path_in_repo=DEST, repo_id=REPO,
+    token = os.environ["HF_TOKEN"].strip().lstrip("﻿").strip()  # ver publish.py
+    HfApi(token=token).upload_file(path_or_fileobj=str(tmp), path_in_repo=DEST, repo_id=REPO,
                                                     repo_type="dataset", commit_message="v7: manifiesto")
     print(f"publicado {DEST} con {len(bases)} entradas")
 

@@ -75,7 +75,10 @@ def main():
     ap.add_argument("--out-json", required=True, type=Path)
     ap.add_argument("--token-file", type=Path)
     a = ap.parse_args()
-    token = os.environ.get("HF_TOKEN") or (a.token_file.read_text(encoding="utf-8").strip() if a.token_file else None)
+    token = os.environ.get("HF_TOKEN") or (a.token_file.read_text(encoding="utf-8") if a.token_file else None)
+    # Limpieza defensiva: un BOM (﻿) o un salto de línea pegados al token rompen el header
+    # Authorization (PowerShell 5.1 antepone BOM al pasar texto por tubería a gh secret set).
+    token = (token or "").strip().lstrip("﻿").strip()
     if not token:
         raise SystemExit("falta el token: define HF_TOKEN o --token-file")
     api = HfApi(token=token)
