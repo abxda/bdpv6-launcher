@@ -1,0 +1,30 @@
+{
+  // BDP v7 "Convergente" · gemela en la nube (GitHub Codespaces).
+  // El MISMO portable v7 de Linux que se descarga para las laptops, sin interfaz gráfica:
+  // bdp_start.py lo baja (verifica sha256) al crear el codespace y enciende el lab al arrancarlo.
+  // Curso por omisión: UP (HDFS + Jupyter + Elasticsearch). Para UNIR: python3 cloud/bdp_start.py unir
+  "name": "BDP v7 · Laboratorio en la nube",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "hostRequirements": { "cpus": 4, "memory": "16gb", "storage": "32gb" },
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {}
+  },
+  "postCreateCommand": "python3 cloud/bdp_start.py install",
+  "postStartCommand": "python3 cloud/bdp_start.py ${BDP_PROFILE:-up} --kernel",
+  "forwardPorts": [8888, 9870],
+  "portsAttributes": {
+    "8888": { "label": "JupyterLab (BDP v7, sin token)", "onAutoForward": "openBrowser" },
+    "9870": { "label": "HDFS · NameNode UI", "onAutoForward": "silent" },
+    "9200": { "label": "Elasticsearch (curso UP)", "onAutoForward": "silent" },
+    "9864": { "label": "HDFS · DataNode", "onAutoForward": "silent" }
+  },
+  "otherPortsAttributes": { "onAutoForward": "silent" },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-toolsai.jupyter", "ms-python.python"]
+    },
+    "codespaces": {
+      "openFiles": ["cloud/LEEME_NUBE.md"]
+    }
+  }
+}
