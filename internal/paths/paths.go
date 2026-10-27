@@ -2,7 +2,9 @@
 //
 // The launcher binary is expected to live at the root of a BDP distribution,
 // next to the service folders (common_jdk/, hadoop/, kafka_kraft/,
-// elasticsearch/, python/, spark/, notebooks/, data/, logs/). ScriptDir is
+// elasticsearch/, python/, spark/, notebooks/, data/, logs/). En el layout v7
+// no existe spark/ (SPARK_HOME = paquete pyspark) y se agregan jupyter-config/
+// y, en Windows, bash/. ScriptDir is
 // the directory containing the running binary, computed once at process
 // start. All service paths are derived from it.
 package paths
@@ -29,6 +31,10 @@ type Paths struct {
 	Data        string
 	Logs        string
 	StateFile   string
+	// v7: carpeta con jupyter_server_config.py (sin token, terminal bash) y el
+	// bash del lab en Windows (Git Bash portable) para la terminal homologada.
+	JupyterConfig string
+	Bash          string
 }
 
 // Detect resolves Paths based on the location of the running executable.
@@ -45,12 +51,60 @@ func Detect() *Paths {
 		Kafka:      filepath.Join(dir, "kafka_kraft"),
 		Elastic:    filepath.Join(dir, "elasticsearch"),
 		Python:     filepath.Join(dir, "python"),
-		Spark:      filepath.Join(dir, "spark"),
+		Spark:      detectSparkHome(dir),
 		Notebooks:  filepath.Join(dir, "notebooks"),
 		Data:       filepath.Join(dir, "data"),
 		Logs:       filepath.Join(dir, "logs"),
 		StateFile:  filepath.Join(dir, ".bdp_state.json"),
+
+		JupyterConfig: filepath.Join(dir, "jupyter-config"),
+		Bash:          filepath.Join(dir, "bash", "bin", "bash.exe"),
 	}
+}
+
+// detectSparkHome devuelve spark/ si existe (layout v6). En el layout v7 no hay
+// carpeta spark/: SPARK_HOME es el paquete pyspark del Python portable, que ya
+// trae los jars de Spark (y los de Sedona/Kafka pre-cargados por el build).
+func detectSparkHome(dir string) string {
+	legacy := filepath.Join(dir, "spark")
+	if isDir(legacy) {
+		return legacy
+	}
+	candidates := []string{filepath.Join(dir, "python", "Lib", "site-packages", "pyspark")}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "python", "lib", "python3*", "site-packages", "pyspark")); len(matches) > 0 {
+		candidates = append(candidates, matches...)
+	}
+	for _, c := range candidates {
+		if isDir(c) {
+			return c
+		}
+	}
+	return legacy
+}
+
+// HadoopAddOpens: con JDK 17 (layout v7), WebHDFS usa Jersey/JAXB, que abre
+// java.lang por reflexión; sin estas opciones WebHDFS responde HTTP 500
+// (InaccessibleObjectException) y fallan el navegador HDFS y el InsecureClient
+// de los cuadernos. Va en HADOOP_OPTS de servicios y consolas.
+const HadoopAddOpens = "--add-opens=java.base/java.lang=ALL-UNNAMED " +
+	"--add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED"
+
+// KafkaLog4jOpts apunta los kafka-*.sh a su log4j2 con una ruta file:/// que
+// java entiende también en Windows (sin esto, en Git Bash llenan la terminal
+// de errores "No configuration found").
+func (p *Paths) KafkaLog4jOpts() string {
+	s := filepath.ToSlash(filepath.Join(p.Kafka, "config", "tools-log4j2.yaml"))
+	if !strings.HasPrefix(s, "/") {
+		s = "/" + s
+	}
+	return "-Dlog4j2.configurationFile=file://" + s
+}
+
+// IsV7 reporta si la distribución es BDP v7 "Convergente" (receta única). El
+// marcador es la configuración de Jupyter que el build v7 coloca en la raíz.
+func (p *Paths) IsV7() bool {
+	_, err := os.Stat(filepath.Join(p.JupyterConfig, "jupyter_server_config.py"))
+	return err == nil
 }
 
 // detectJavaHome resolves the actual JAVA_HOME inside common_jdk/. On

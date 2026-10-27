@@ -21,6 +21,9 @@ type State struct {
 	AutoStartJupyter bool            `json:"autoStartJupyter"`
 	PortOverrides    map[string]int  `json:"portOverrides"`
 	JVMHeap          map[string]string `json:"jvmHeap"`
+	// Profile es el curso del alumno en v7: "up" (+ Elasticsearch), "unir"
+	// (+ Kafka) o "all". Vacío = aún no elige.
+	Profile string `json:"profile,omitempty"`
 }
 
 func defaults() State {
@@ -30,7 +33,9 @@ func defaults() State {
 		AutoStartJupyter: true,
 		PortOverrides:    map[string]int{},
 		JVMHeap: map[string]string{
-			"elasticsearch": "1g",
+			// v7: 512m alcanzó para el recorte por estado (467,926 docs, servidor
+			// ~0.9 GB en total). Para la demo nacional se sube desde la UI.
+			"elasticsearch": "512m",
 			"hadoop":        "1g",
 		},
 	}
@@ -73,6 +78,7 @@ func (s *Store) Load() error {
 	merged.SetupCompletedAt = loaded.SetupCompletedAt
 	merged.AlwaysOnTop = loaded.AlwaysOnTop
 	merged.AutoStartJupyter = loaded.AutoStartJupyter
+	merged.Profile = loaded.Profile
 	if loaded.PortOverrides != nil {
 		merged.PortOverrides = loaded.PortOverrides
 	}

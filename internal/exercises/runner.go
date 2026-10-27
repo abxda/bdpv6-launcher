@@ -200,6 +200,10 @@ func (r *Runner) buildEnv() []string {
 		filepath.Join(r.p.Python, "Scripts"),    // Windows: pip / jupyterlab.exe
 		filepath.Join(r.p.Python, "bin"),        // Mac / Linux: python3 + pip3
 	}
+	if r.p.IsV7() {
+		// v7 (JDK 17): mismas opciones que los servicios HDFS (WebHDFS / reflexión).
+		overrides["HADOOP_OPTS"] = paths.HadoopAddOpens
+	}
 	overrides["PATH"] = mergePath(pathDirs)
 	return mergeOSEnv(overrides)
 }

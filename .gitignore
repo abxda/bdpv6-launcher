@@ -29,3 +29,7 @@ vendor/
 
 # Node (just in case anyone adds tools)
 node_modules/
+
+# v7: caché de descargas y salida del build del portable
+.cache/
+dist/

@@ -1,0 +1,87 @@
+# BDP v7 "Convergente" · receta única del laboratorio.
+# build_portable.py lee este archivo, descarga cada pieza, VERIFICA su hash y arma el portable con el
+# MISMO layout de carpetas en Windows, macOS y Linux (el que espera el launcher). Si una pieza no trae
+# hash aquí, se toma de su fuente oficial (.sha512 / SHA256SUMS / API de Adoptium).
+# Versiones fijadas en la Fase 1 (D:\BDP\v7_spike\SPIKE_REPORT.md, 2026-10-27).
+
+[meta]
+version = "7.0.0-dev1"
+platforms = ["win-64", "osx-arm64", "linux-64"]
+perfiles = ["up", "unir"]          # base = HDFS + Jupyter; up = + Elasticsearch; unir = + Kafka
+
+[python]                           # python-build-standalone (reubicable) + lock universal de uv
+version = "3.12.16"
+release = "20261026"
+lock = "requirements.lock"
+[python.triple]
+win-64 = "x86_64-pc-windows-msvc"
+osx-arm64 = "aarch64-apple-darwin"
+linux-64 = "x86_64-unknown-linux-gnu"
+
+[uv]
+version = "0.13.6"
+[uv.asset]
+win-64 = "uv-x86_64-pc-windows-msvc.zip"
+osx-arm64 = "uv-aarch64-apple-darwin.tar.gz"
+linux-64 = "uv-x86_64-unknown-linux-gnu.tar.gz"
+
+[jdk]                              # un solo JDK para Hadoop, Spark, Kafka y ES (ES_JAVA_HOME)
+release = "jdk-17.0.20.1+1"        # Temurin; URL y sha256 por SO desde la API de Adoptium
+slim = ["jmods", "lib/src.zip"]
+
+[hadoop]                           # solo HDFS + MapReduce local (Ejercicio_01)
+version = "3.3.6"
+urls = ["https://dlcdn.apache.org/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz",
+        "https://archive.apache.org/dist/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz"]
+sha512 = "de3eaca2e0517e4b569a88b63c89fae19cb8ac6c01ff990f1ff8f0cc0f3128c8e8a23db01577ca562a0e0bb1b4a3889f8c74384e609cd55e537aada3dcaa9f8a"
+[hadoop.winutils]                  # solo win-64: los mismos binarios que v6 (probados)
+url_base = "https://huggingface.co/datasets/abxda/bdp-lab/resolve/main/v7/deps/hadoop-3.3.6-windows"
+[hadoop.winutils.sha256]
+"winutils.exe" = "496a591eb1e67df2a620f710d529ba6ddfe1c19149e6647cc4e320bb0efd8553"
+"hadoop.dll" = "d7ab36a68518748cef142be2da5069b4c763c2cd764c1d2e6ac48c7200405be3"
+
+[pyspark]
+version = "4.1.4"                  # SPARK_HOME = <python>/site-packages/pyspark (sin carpeta spark/)
+
+[[jars]]                           # se copian a pyspark/jars: nada de Maven en clase
+coord = "org.apache.sedona:sedona-spark-shaded-4.1_2.13:1.9.1"
+perfil = "up"
+sha1 = "462c6dff5530c79d591a70cedb879a7c686e4c4a"
+[[jars]]
+coord = "org.datasyslab:geotools-wrapper:1.9.1-33.5"
+perfil = "up"
+sha1 = "696a4087f40a2c6d5f615a207719f319ec6488b4"
+[[jars]]
+coord = "org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.4"
+perfil = "unir"
+sha1 = "56b124f75b26877b0a2a1cf156f9a5c1b7234486"
+[[jars]]
+coord = "org.apache.spark:spark-token-provider-kafka-0-10_2.13:4.1.4"
+perfil = "unir"
+sha1 = "e3a0e7f197f7d6da2ecbec2f453885a5a40734e2"
+[[jars]]
+coord = "org.apache.kafka:kafka-clients:3.9.1"
+perfil = "unir"
+sha1 = "86ca079953ed5606257ff298c24666b26da6985b"
+[[jars]]
+coord = "org.apache.commons:commons-pool2:2.12.1"
+perfil = "unir"
+sha1 = "e5c7b6c9f5a4b59be2bba213fbec70b413376fc1"
+
+[elasticsearch]                    # perfil UP · se quita su JDK propio (821 -> 496 MB)
+version = "8.19.23"
+[elasticsearch.asset]
+win-64 = "windows-x86_64.zip"
+osx-arm64 = "darwin-aarch64.tar.gz"
+linux-64 = "linux-x86_64.tar.gz"
+[elasticsearch.sha512]
+win-64 = "52fbdebc355591276088b0811211a930f9fa70c215e13340695b68b7dea38b21c065e4410185fb72174f763c8b2590d4528ce6d692e1dcdfb1786ebddea1920d"
+
+[kafka]                            # perfil UNIR · configuración segura para Windows
+version = "4.3.2"
+scala = "2.13"
+sha512 = "c2063485f90312bba795052df3e49b8eea337adf97f1111b946c60771c7a2f088055d2ccc7221d72fe30bd6a3f7a58348f14e14240eaddfe60446ea1c033618b"
+
+[gitbash]                          # solo win-64 · terminal homologada (bash en los 3 SO)
+url = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/PortableGit-2.56.0.4-64-bit.7z.exe"
+sha256 = "b1f3e52216e2ed6882d1bebfd4d3fdf319bec40d2edbbf9fd26ec4fd3fce7ed1"

@@ -71,14 +71,18 @@ func (k *Kafka) Start(ctx context.Context) error {
 	}
 
 	classpath := KafkaWildcardClasspath(k.p)
-	log4j := filepath.Join(k.p.Kafka, "config", "log4j.properties")
+	log4jArg := "-Dlog4j.configuration=file:" + filepath.ToSlash(filepath.Join(k.p.Kafka, "config", "log4j.properties"))
+	// Kafka 4.x (layout v7) usa log4j2 (config/log4j2.yaml) en lugar de log4j 1.
+	if yaml := filepath.Join(k.p.Kafka, "config", "log4j2.yaml"); fileExists(yaml) {
+		log4jArg = "-Dlog4j2.configurationFile=" + fileURI(yaml)
+	}
 
 	args := []string{
 		"-Xms" + heap, "-Xmx" + heap,
 		"-server",
 		"-XX:+UseG1GC",
 		"-XX:MaxGCPauseMillis=20",
-		"-Dlog4j.configuration=file:" + filepath.ToSlash(log4j),
+		log4jArg,
 		"-Dkafka.logs.dir=" + filepath.ToSlash(filepath.Join(k.p.Logs, "kafka")),
 		"-classpath", classpath,
 		"kafka.Kafka",

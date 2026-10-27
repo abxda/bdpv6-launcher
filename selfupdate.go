@@ -18,8 +18,9 @@ import (
 )
 
 // selfUpdateBase es la carpeta en Hugging Face donde se publican el exe del
-// launcher y su descriptor de versión por plataforma.
-const selfUpdateBase = "https://huggingface.co/datasets/abxda/bdp-lab/resolve/main/launchers"
+// launcher y su descriptor de versión por plataforma. v7 tiene su propio canal
+// (v7/launchers) para que un alumno de v6 nunca reciba el launcher v7, ni al revés.
+const selfUpdateBase = "https://huggingface.co/datasets/abxda/bdp-lab/resolve/main/v7/launchers"
 
 type latestInfo struct {
 	Version string `json:"version"`

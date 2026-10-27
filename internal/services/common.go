@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/abxda/bdpv6-launcher/internal/logsink"
@@ -12,11 +13,44 @@ import (
 // javaEnv returns the minimum environment a Hadoop / Kafka / Elasticsearch
 // process needs to find the bundled JDK and Hadoop config.
 func javaEnv(p *paths.Paths) map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"JAVA_HOME":       p.CommonJDK,
 		"HADOOP_HOME":     p.Hadoop,
 		"HADOOP_CONF_DIR": p.HadoopConf,
 	}
+	if p.IsV7() {
+		env["HADOOP_OPTS"] = paths.HadoopAddOpens
+		// Techo de heap para NameNode/DataNode (y clientes hdfs). Los .cmd de
+		// Windows leen HADOOP_HEAPSIZE en MB (si no, -Xmx1000m); los scripts
+		// Unix leen HADOOP_HEAPSIZE_MAX.
+		env["HADOOP_HEAPSIZE"] = "512"
+		env["HADOOP_HEAPSIZE_MAX"] = "512m"
+	}
+	return env
+}
+
+// fileURI convierte una ruta absoluta en file:///D:/... (Windows) o
+// file:///home/... (Unix), la forma que esperan log4j2 y Hadoop.
+func fileURI(abs string) string {
+	s := filepath.ToSlash(abs)
+	if strings.HasPrefix(s, "/") {
+		return "file://" + s
+	}
+	return "file:///" + s
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+// pythonBinDirs son las carpetas del Python portable que van al PATH para que
+// `python` (y `python -m pip/streamlit/...`) resuelvan al del lab.
+func pythonBinDirs(p *paths.Paths) []string {
+	if runtime.GOOS == "windows" {
+		return []string{p.Python}
+	}
+	return []string{filepath.Join(p.Python, "bin")}
 }
 
 // jupyterEnv extends javaEnv with PySpark hooks so notebooks that import
@@ -31,12 +65,34 @@ func jupyterEnv(p *paths.Paths) map[string]string {
 	env["PYSPARK_PYTHON"] = p.PythonBinary()
 	env["PYSPARK_DRIVER_PYTHON"] = p.PythonBinary()
 	sep := string(os.PathListSeparator)
-	binDirs := strings.Join([]string{
+	dirs := []string{
 		filepath.Join(p.Hadoop, "bin"),
 		filepath.Join(p.Spark, "bin"),
 		filepath.Join(p.CommonJDK, "bin"),
-	}, sep)
-	env["PATH"] = binDirs + sep + os.Getenv("PATH")
+	}
+	if p.IsV7() {
+		// v7: la terminal homologada (bash en los 3 SO) reconoce por nombre
+		// python, hdfs, kafka-topics.sh, spark-submit y java, sin exports.
+		dirs = append(pythonBinDirs(p),
+			filepath.Join(p.Hadoop, "bin"),
+			filepath.Join(p.Spark, "bin"),
+			filepath.Join(p.Kafka, "bin"),
+			filepath.Join(p.CommonJDK, "bin"))
+		// Los kafka-*.sh pasan a java una ruta /d/... para log4j2 que en
+		// Windows no existe (llenan la terminal de errores); se fija aquí.
+		env["KAFKA_LOG4J_OPTS"] = p.KafkaLog4jOpts()
+		// Jupyter aislado del ~/.jupyter del alumno: config sin token y con
+		// terminal bash (jupyter-config/jupyter_server_config.py).
+		env["JUPYTER_CONFIG_DIR"] = p.JupyterConfig
+		env["JUPYTER_DATA_DIR"] = filepath.Join(p.Data, "jupyter", "data")
+		env["JUPYTER_RUNTIME_DIR"] = filepath.Join(p.Data, "jupyter", "runtime")
+		env["BDP_NOTEBOOKS"] = p.Notebooks
+		env["CHERE_INVOKING"] = "1" // Git Bash: no saltar a $HOME al abrir
+		if runtime.GOOS == "windows" {
+			env["BDP_BASH"] = p.Bash
+		}
+	}
+	env["PATH"] = strings.Join(dirs, sep) + sep + os.Getenv("PATH")
 	return env
 }
 

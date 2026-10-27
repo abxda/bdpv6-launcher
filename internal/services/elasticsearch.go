@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -57,6 +59,12 @@ func (e *Elasticsearch) Start(ctx context.Context) error {
 	env := map[string]string{
 		"JAVA_HOME":      e.p.CommonJDK,
 		"ES_JAVA_OPTS":   fmt.Sprintf("-Xms%s -Xmx%s", e.heapOrDefault(), e.heapOrDefault()),
+	}
+	// v7: ES viene sin su JDK propio y usa el JDK común. ES 8 ignora JAVA_HOME;
+	// solo respeta ES_JAVA_HOME. (Si elasticsearch/jdk existe, layout v6, no se
+	// toca: el JDK 11 de v6 no sirve para ES 8.)
+	if _, err := os.Stat(filepath.Join(e.p.Elastic, "jdk")); os.IsNotExist(err) {
+		env["ES_JAVA_HOME"] = e.p.CommonJDK
 	}
 
 	args := []string{}

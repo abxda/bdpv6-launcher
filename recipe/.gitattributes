@@ -1,0 +1,3 @@
+# Scripts que lee bash: siempre LF (también en checkouts de Windows).
+*.sh text eol=lf
+*.py text eol=lf

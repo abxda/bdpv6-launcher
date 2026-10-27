@@ -1,0 +1,20 @@
+# BDP v7 · Elasticsearch del lab (perfil UP): un nodo, solo localhost, sin seguridad, sin ML.
+cluster.name: portable-es-cluster
+node.name: portable-node-1
+network.host: 127.0.0.1
+http.port: 9200
+discovery.type: single-node
+# Relativo a ES_HOME (elasticsearch/) -> <portable>/data/es_data. En v6 decía ../../ y el índice
+# terminaba FUERA de la carpeta portable (en la carpeta padre).
+path.data: ../data/es_data
+path.logs: ../logs/es_logs
+xpack.security.enabled: false
+xpack.security.enrollment.enabled: false
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false
+xpack.ml.enabled: false
+ingest.geoip.downloader.enabled: false
+# Elasticvue (app de escritorio o web) necesita CORS; el nodo solo escucha en 127.0.0.1.
+http.cors.enabled: true
+http.cors.allow-origin: "*"
+http.cors.allow-headers: X-Requested-With,Content-Type,Content-Length,Authorization

@@ -98,6 +98,11 @@ func (j *Jupyter) Start(ctx context.Context) error {
 	j.proc = proc
 	j.startedAt = time.Now()
 	j.url = ""
+	// v7: Jupyter corre sin token (solo escucha en 127.0.0.1), así que la URL
+	// se conoce de antemano: /lab directo, sin copiar tokens.
+	if j.p.IsV7() {
+		j.url = fmt.Sprintf("http://127.0.0.1:%d/lab", j.port)
+	}
 	j.sink.Emit("INFO", fmt.Sprintf("Jupyter arrancado con PID %d", proc.PID()))
 	return nil
 }

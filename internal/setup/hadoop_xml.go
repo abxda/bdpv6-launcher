@@ -82,5 +82,17 @@ const hdfsSiteTmpl = `<?xml version="1.0" encoding="UTF-8"?>
         <name>dfs.permissions.enabled</name>
         <value>false</value>
     </property>
+    <!-- v7: todo ligado a localhost. El DataNode ya no se expone a la LAN y WebHDFS redirige a
+         localhost:9864 (antes redirigía a la IP de la LAN -> MaxRetryError si cambiaba la red). -->
+    <property><name>dfs.namenode.rpc-bind-host</name><value>127.0.0.1</value></property>
+    <property><name>dfs.namenode.http-address</name><value>127.0.0.1:9870</value></property>
+    <property><name>dfs.datanode.address</name><value>127.0.0.1:9866</value></property>
+    <property><name>dfs.datanode.http.address</name><value>127.0.0.1:9864</value></property>
+    <property><name>dfs.datanode.ipc.address</name><value>127.0.0.1:9867</value></property>
+    <property><name>dfs.datanode.hostname</name><value>localhost</value></property>
+    <property><name>dfs.client.use.datanode.hostname</name><value>true</value></property>
+    <property><name>dfs.datanode.use.datanode.hostname</name><value>true</value></property>
+    <!-- v7: WebHDFS acepta usuarios que empiezan con número (p.ej. 17064). -->
+    <property><name>dfs.webhdfs.user.provider.user.pattern</name><value>^[A-Za-z0-9_][A-Za-z0-9._-]*[$]?$</value></property>
 </configuration>
 `

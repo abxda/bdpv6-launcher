@@ -87,6 +87,13 @@ const STR = {
         'dashboard.services':     'Servicios',
         'services.startAll':      'Iniciar TODO',
         'services.stopAll':       'Detener TODO',
+        'services.startProfile':  'Iniciar mi curso',
+        'services.profile':       'Curso',
+        'services.profile.choose':'Elige tu curso…',
+        'services.profile.up':    'UP · HDFS + Jupyter + Elasticsearch',
+        'services.profile.unir':  'UNIR · HDFS + Jupyter + Kafka',
+        'services.profile.all':   'Todo (los 5 servicios)',
+        'services.profile.pick':  'Primero elige tu curso en el selector "Curso": así solo se encienden los servicios que usa tu clase (y tu equipo trabaja más ligero).',
         'services.unavailable':   'No pude cargar la lista de servicios. Reinicia el launcher; si persiste, usa la pestaña Reparar.',
         'services.start':         'Iniciar',
         'services.stop':          'Detener',
@@ -233,6 +240,13 @@ const STR = {
         'dashboard.services':     'Services',
         'services.startAll':      'Start ALL',
         'services.stopAll':       'Stop ALL',
+        'services.startProfile':  'Start my course',
+        'services.profile':       'Course',
+        'services.profile.choose':'Choose your course…',
+        'services.profile.up':    'UP · HDFS + Jupyter + Elasticsearch',
+        'services.profile.unir':  'UNIR · HDFS + Jupyter + Kafka',
+        'services.profile.all':   'Everything (all 5 services)',
+        'services.profile.pick':  'First choose your course in the "Course" selector: only the services your class uses will start (lighter on your machine).',
         'services.unavailable':   'Could not load the services list. Restart the launcher; if it persists, use the Repair tab.',
         'services.start':         'Start',
         'services.stop':          'Stop',
@@ -1247,12 +1261,28 @@ function appendRepairLine(line) {
 
 /* ---------- Services tab -------------------------------------------------- */
 async function renderServices(root) {
-    // Header actions
+    // Header actions. v7: selector de curso; "Iniciar" enciende la base
+    // (HDFS + Jupyter) más el servicio del curso (UP → Elasticsearch, UNIR → Kafka).
+    const profile = (STATE.settings && STATE.settings.profile) || '';
+    const opt = (v, key) => '<option value="' + v + '"' + (profile === v ? ' selected' : '') + '>' + t(key) + '</option>';
     document.getElementById('viewActions').innerHTML =
-        '<button class="c-btn c-btn--primary" id="actStartAll">' + iconHTML('play') + ' ' + t('services.startAll') + '</button>' +
+        '<label style="display:inline-flex;align-items:center;gap:6px;margin-right:8px;">' + t('services.profile') +
+            ' <select id="profileSel" class="c-input">' +
+                (profile ? '' : '<option value="" selected disabled>' + t('services.profile.choose') + '</option>') +
+                opt('up', 'services.profile.up') + opt('unir', 'services.profile.unir') + opt('all', 'services.profile.all') +
+            '</select></label>' +
+        '<button class="c-btn c-btn--primary" id="actStartAll">' + iconHTML('play') + ' ' +
+            t(profile === 'all' ? 'services.startAll' : 'services.startProfile') + '</button>' +
         '<button class="c-btn c-btn--danger"  id="actStopAll">'  + iconHTML('stop') + ' ' + t('services.stopAll')  + '</button>';
     document.getElementById('actStartAll').addEventListener('click', startAll);
     document.getElementById('actStopAll').addEventListener('click', stopAll);
+    document.getElementById('profileSel').addEventListener('change', async (ev) => {
+        try {
+            await window.go.main.App.SetProfile(ev.target.value);
+            STATE.settings = await window.go.main.App.GetState();
+        } catch (e) { alert('Error: ' + e); }
+        renderView('services');
+    });
 
     // Auto-cura: si la lista llegó vacía (p.ej. la UI cargó antes de que el
     // backend registrara los servicios), la volvemos a pedir aquí en vez de
@@ -1333,7 +1363,21 @@ async function handleStartError(e, id) {
 async function stopService(id) {
     try { await window.go.main.App.StopService(id); } catch (e) { alert('Error: ' + e); }
 }
-async function startAll() { for (const s of STATE.services) await startService(s.id); }
+// Servicios que NO usa cada curso: UP no usa Kafka; UNIR no usa Elasticsearch.
+const PROFILE_SKIP = { up: ['kafka'], unir: ['elasticsearch'], all: [] };
+async function startAll() {
+    const profile = (STATE.settings && STATE.settings.profile) || '';
+    if (!PROFILE_SKIP[profile]) {
+        alert(t('services.profile.pick'));
+        const sel = document.getElementById('profileSel');
+        if (sel) sel.focus();
+        return;
+    }
+    for (const s of STATE.services) {
+        if (PROFILE_SKIP[profile].includes(s.id)) continue;
+        await startService(s.id);
+    }
+}
 async function stopAll()  { for (const s of [...STATE.services].reverse()) await stopService(s.id); }
 
 /* ---------- Ports tab ----------------------------------------------------- */

@@ -1,0 +1,149 @@
+# BDP v7 "Convergente": la MISMA receta (recipe/stack.toml) construida nativa en los 3 SO.
+# - push a la rama v7 (recipe/ o este archivo): compila launcher + portable y corre las pruebas de humo.
+# - workflow_dispatch con publish=true: además sube a Hugging Face (solo bajo v7/), escribe el
+#   manifiesto v7 (un solo escritor) y crea la GitHub Release con constancia de origen.
+# Reemplaza a los agentes que compilaban a mano en Mac y Linux.
+name: build-v7
+
+on:
+  push:
+    branches: [v7]
+    paths: ["recipe/**", ".github/workflows/build-v7.yml", "internal/**", "frontend/**", "*.go"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publicar en HF (v7/) y crear la GitHub Release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win-64
+            wails: windows/amd64
+            tags: ""
+            launcher: build/bin/bdpv6-launcher.exe
+          - os: ubuntu-24.04
+            platform: linux-64
+            wails: linux/amd64
+            tags: "-tags webkit2_41"
+            launcher: build/bin/bdpv6-launcher
+          - os: macos-14
+            platform: osx-arm64
+            wails: darwin/arm64
+            tags: ""
+            launcher: "build/bin/BDPV6 Launcher.app"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias de Wails (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
+
+      - name: Compilar launcher (Wails nativo)
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          wails build -platform ${{ matrix.wails }} ${{ matrix.tags }} -trimpath -skipbindings -clean
+
+      - name: Firma ad-hoc (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --force --deep --sign - "build/bin/BDPV6 Launcher.app"
+
+      - name: Caché de descargas verificadas
+        uses: actions/cache@v4
+        with:
+          path: .cache/v7/downloads
+          key: v7-dl-${{ matrix.platform }}-${{ hashFiles('recipe/stack.toml', 'recipe/requirements.lock') }}
+
+      - name: Construir portable desde la receta
+        shell: bash
+        run: |
+          pip install huggingface_hub
+          python recipe/build_portable.py --platform ${{ matrix.platform }} --out dist/portable \
+            --launcher "${{ matrix.launcher }}" --package
+
+      - name: Prueba de humo · perfil UP (HDFS + Spark/Sedona/MLlib + Elasticsearch)
+        run: python recipe/smoke_test.py --dist dist/portable --profile up
+
+      - name: Prueba de humo · perfil UNIR (HDFS + Spark + Kafka)
+        run: python recipe/smoke_test.py --dist dist/portable --profile unir
+
+      - name: Constancia de origen
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            dist/bdp-v7-portable-*.tar.gz
+            ${{ matrix.launcher }}
+
+      - name: Publicar en Hugging Face (v7/)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          VERSION=$(grep -oE 'AppVersion = "[^"]+"' app.go | cut -d'"' -f2)
+          python recipe/publish.py --platform ${{ matrix.platform }} --tarball dist/bdp-v7-portable-*.tar.gz \
+            --launcher "${{ matrix.launcher }}" --version "$VERSION" --out-json dist/publish-${{ matrix.platform }}.json
+
+      - name: Guardar entrada de manifiesto
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-${{ matrix.platform }}
+          path: |
+            dist/publish-${{ matrix.platform }}.json
+            dist/bdp-v7-portable-*.tar.gz.sha256
+
+  manifest:
+    name: manifiesto v7 + GitHub Release
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Escribir v7/manifest-v7.txt (un solo escritor)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install huggingface_hub
+          python recipe/write_manifest.py dist/publish-*.json
+      - name: GitHub Release (pre-release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep -oE 'AppVersion = "[^"]+"' app.go | cut -d'"' -f2)
+          gh release create "v${VERSION}" --target "${GITHUB_SHA}" --prerelease \
+            --title "BDP v7 ${VERSION} (Convergente)" \
+            --notes "Portable v7 construido por CI desde recipe/stack.toml. Descarga: v7/manifest-v7.txt en Hugging Face (abxda/bdp-lab). Hashes adjuntos." \
+            dist/*.sha256 manifest-v7.txt 2>/dev/null || \
+          gh release create "v${VERSION}" --target "${GITHUB_SHA}" --prerelease \
+            --title "BDP v7 ${VERSION} (Convergente)" --notes "Ver v7/manifest-v7.txt en HF." dist/*.sha256

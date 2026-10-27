@@ -61,7 +61,7 @@ type App struct {
 // AppVersion es la versión del launcher. Es var (no const) para poder
 // sobreescribirla con -ldflags "-X main.AppVersion=..." (útil para probar la
 // auto-actualización simulando una versión más vieja).
-var AppVersion = "0.2.7"
+var AppVersion = "7.0.0-dev1"
 
 func NewApp() *App {
 	p := paths.Detect()
@@ -416,6 +416,23 @@ func (a *App) SetJVMHeap(serviceID, heap string) error {
 		}
 		s.JVMHeap[serviceID] = heap
 	})
+}
+
+// GetProfile devuelve el perfil de curso elegido: "up" (HDFS + Jupyter +
+// Elasticsearch), "unir" (HDFS + Jupyter + Kafka), "all" o "" si aún no elige.
+func (a *App) GetProfile() string { return a.state.Get().Profile }
+
+// SetProfile guarda el perfil de curso. "Iniciar mi curso" enciende la base
+// (HDFS + Jupyter) más el servicio del perfil; nunca hacen falta ES y Kafka a la
+// vez, así que cada curso se ahorra una JVM.
+func (a *App) SetProfile(profile string) error {
+	switch profile {
+	case "up", "unir", "all":
+	default:
+		return fmt.Errorf("perfil desconocido: %q", profile)
+	}
+	a.setupSink.Emit("INFO", "Perfil de curso: "+profile)
+	return a.state.Update(func(s *state.State) { s.Profile = profile })
 }
 
 // GetSysInfo returns one synchronous sample — useful for the initial

@@ -1,0 +1,35 @@
+# BDP v7 — dependencias de Python. UNA sola lista para Windows, macOS y Linux.
+# Se compila con:  uv pip compile --universal --python-version 3.12 --generate-hashes
+# Origen: imports reales de los cuadernos UP (S2-S4, API Flask, app Streamlit) y UNIR (Kafka/Spark ML).
+
+# Motor
+pyspark==4.1.4
+apache-sedona==1.9.1          # debe coincidir con los jars sedona-spark-shaded-4.1_2.13:1.9.1
+
+# Jupyter
+jupyterlab>=4.4,<5
+ipykernel
+
+# Datos
+numpy
+pandas
+pyarrow
+
+# Geo (UP S3-S4)
+geopandas
+shapely
+pyproj
+
+# Servicios del lab
+hdfs                          # HdfsCLI: InsecureClient (WebHDFS)
+elasticsearch>=8.19,<9        # cliente alineado con el servidor ES 8.19 (perfil UP)
+
+# Apps (UP S3 Streamlit, S4 API Flask)
+flask
+streamlit
+folium
+streamlit-folium
+
+# Utilidades
+matplotlib
+requests
