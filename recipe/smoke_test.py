@@ -100,10 +100,17 @@ class Lab:
         body = "\n".join(f"  <property><name>{k}</name><value>{v}</value></property>" for k, v in props.items())
         (conf / "hdfs-site.xml").write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<configuration>\n{body}\n</configuration>\n', encoding="utf-8")
 
-    def py_run(self, code, timeout=900):
+    def py_run(self, code, marker, timeout=900):
+        """Ejecuta código en el Python del lab y devuelve (ok, línea con 'marker' o el error).
+        Se busca el marcador en TODA la salida: en Windows, spark.stop() imprime al final los
+        mensajes de taskkill ('...ha sido terminado.')."""
         r = subprocess.run([str(self.py), "-c", code], env=self.env, capture_output=True, text=True, timeout=timeout)
-        out = (r.stdout or "").strip().splitlines()
-        return r.returncode == 0, (out[-1] if out else (r.stderr or "")[-400:])
+        hits = [ln for ln in (r.stdout or "").splitlines() if ln.startswith(marker)]
+        if r.returncode == 0 and hits:
+            return True, hits[-1]
+        err = [ln for ln in (r.stderr or "").splitlines() if ln.strip()]
+        tail = " | ".join(err[-4:]) if err else (r.stdout or "")[-300:]
+        return False, f"exit {r.returncode}: {tail[:600]}"
 
 
 def stop_all():
@@ -184,7 +191,7 @@ import pyspark
 print(f'pyspark={{pyspark.__version__}} filas={{n}}{{extra}}')
 s.stop()
 """
-        ok, detail = lab.py_run(code)
+        ok, detail = lab.py_run(code, "pyspark=")
         check("Spark: HDFS -> parquet local" + (" + Sedona + MLlib" if up else ""), ok and "filas=500" in detail, detail)
 
         # --- Elasticsearch (perfil UP) ------------------------------------------------------------
@@ -200,17 +207,19 @@ s.stop()
                     if healthy:
                         break
                 except Exception:  # noqa: BLE001 - aún arrancando
-                    time.sleep(1)
+                    pass
+                time.sleep(1)  # también si responde "red" (recuperando índices)
             check("Elasticsearch responde (JDK común, sin ML)", healthy)
             code = """
 from elasticsearch import Elasticsearch, helpers
-es = Elasticsearch('http://localhost:9200')
+es = Elasticsearch('http://localhost:9200', request_timeout=60)
+es.indices.delete(index='smoke', ignore_unavailable=True)
 es.indices.create(index='smoke', mappings={'properties': {'location': {'type': 'geo_point'}}})
 helpers.bulk(es, ({'_index': 'smoke', '_source': {'n': i, 'location': {'lat': 21.88, 'lon': -102.29}}} for i in range(100)))
 es.indices.refresh(index='smoke')
 print('docs', es.count(index='smoke')['count'], 'ml', es.xpack.info()['features']['ml']['enabled'])
 """
-            ok, detail = lab.py_run(code, timeout=300)
+            ok, detail = lab.py_run(code, "docs", timeout=300)
             check("ES: helpers.bulk 100 docs con geo_point", ok and "docs 100" in detail, detail)
             data_inside = (lab.d / "data" / "es_data").exists()
             check("ES guarda su índice DENTRO del portable (data/es_data)", data_inside)
@@ -241,7 +250,7 @@ n = s.read.format('kafka').option('kafka.bootstrap.servers','localhost:9092').op
 print('mensajes', n)
 s.stop()
 """
-            ok, detail = lab.py_run(code)
+            ok, detail = lab.py_run(code, "mensajes")
             check("Kafka <-> Spark (conector pre-cargado)", ok and "mensajes 10" in detail, detail)
             r = subprocess.run([java, log4j, "-cp", cp, "org.apache.kafka.tools.TopicCommand", "--bootstrap-server",
                                 "localhost:9092", "--delete", "--topic", "smoke"], env=lab.env, capture_output=True, text=True)
@@ -249,7 +258,8 @@ s.stop()
     finally:
         stop_all()
         time.sleep(3)
-        busy = [p for p in (9000, 9092, 9093, 9200, 9864, 9866, 9870) if port_open(p)]
+        used = [9000, 9864, 9866, 9870] + ([9200] if up else []) + ([9092, 9093] if unir else [])
+        busy = [p for p in used if port_open(p)]
         check("apagado limpio: puertos libres", not busy, f"ocupados: {busy}" if busy else "")
     fails = [r for r in RESULTS if not r[1]]
     log(f"RESUMEN perfil={a.profile}: {len(RESULTS) - len(fails)}/{len(RESULTS)} OK")

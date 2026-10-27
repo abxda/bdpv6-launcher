@@ -42,6 +42,7 @@ UA = {"User-Agent": "bdp-v7-build"}
 HOST = {("Windows", "AMD64"): "win-64", ("Linux", "x86_64"): "linux-64",
         ("Darwin", "arm64"): "osx-arm64"}.get((platform.system(), platform.machine()))
 ADOPTIUM = {"win-64": ("windows", "x64"), "linux-64": ("linux", "x64"), "osx-arm64": ("mac", "aarch64")}
+BUILD_MARK = ".bdp-build-en-curso"
 
 
 def log(msg):
@@ -112,21 +113,24 @@ def fetch(urls, dest: Path, algo, expected):
     return dest
 
 
-def extract(archive: Path, into: Path):
-    """Extrae y devuelve la carpeta superior única del archivo (o 'into' si no hay una sola)."""
+def extract(archive: Path, into: Path, skip=None):
+    """Extrae y devuelve la carpeta superior única del archivo (o 'into' si no hay una sola).
+    skip(nombre) -> True omite ese miembro (p.ej. la documentación de Hadoop: sus rutas pasan el límite
+    de 260 caracteres de Windows y de todos modos se borraría)."""
     if into.exists():
         shutil.rmtree(into)
     into.mkdir(parents=True)
     name = archive.name.lower()
     if name.endswith(".zip"):
         with zipfile.ZipFile(archive) as z:
-            z.extractall(into)
+            z.extractall(into, members=[m for m in z.namelist() if not (skip and skip(m))])
     elif name.endswith((".tar.gz", ".tgz")):
         with tarfile.open(archive) as t:
+            members = [m for m in t.getmembers() if not (skip and skip(m.name))]
             if hasattr(tarfile, "data_filter"):
-                t.extractall(into, filter="data")
+                t.extractall(into, members=members, filter="data")
             else:
-                t.extractall(into)
+                t.extractall(into, members=members)
     elif name.endswith(".7z.exe"):  # PortableGit: autoextraíble 7-Zip
         subprocess.run([str(archive), "-y", f"-o{into}"], check=True)
         return into
@@ -134,6 +138,14 @@ def extract(archive: Path, into: Path):
         raise ValueError(f"formato no soportado: {archive.name}")
     entries = [p for p in into.iterdir()]
     return entries[0] if len(entries) == 1 and entries[0].is_dir() else into
+
+
+_HADOOP_SKIP = re.compile(r"/share/doc/|/jdiff/|/sources/|-tests\.jar$|/share/hadoop/tools/lib/(?!hadoop-streaming-)")
+
+
+def hadoop_skip(member):
+    """Lo que el lab no usa de Hadoop (se omite al extraer; el adelgazado posterior quita el resto)."""
+    return bool(_HADOOP_SKIP.search(member))
 
 
 def rm(*paths):
@@ -251,8 +263,8 @@ class Build:
     def hadoop(self):
         H = self.S["hadoop"]
         arc = fetch(H["urls"], self.dl / f"hadoop-{H['version']}.tar.gz", "sha512", H["sha512"])
-        log("  extrayendo Hadoop (~700 MB)")
-        top = extract(arc, self.work / "hadoop")
+        log("  extrayendo Hadoop (sin documentación, fuentes ni SDKs de nube)")
+        top = extract(arc, self.work / "hadoop", skip=hadoop_skip)
         h = self.move_into(top, "hadoop")
         before = dir_size_mb(h)
         sh = h / "share" / "hadoop"
@@ -341,6 +353,7 @@ class Build:
     def run(self):
         t0 = time.time()
         self.out.mkdir(parents=True, exist_ok=True)
+        (self.out / BUILD_MARK).write_text("build en curso\n", encoding="utf-8")
         steps = [("Python portable", self.python), ("Dependencias de Python (lock universal)", self.pip_install),
                  ("Jars pre-cargados (Sedona, Kafka)", self.jars), ("JDK", self.jdk), ("Hadoop", self.hadoop),
                  ("Kafka (perfil UNIR)", self.kafka), ("Elasticsearch (perfil UP)", self.elasticsearch)]
@@ -350,7 +363,7 @@ class Build:
         for i, (name, fn) in enumerate(steps, 1):
             log(f"[{i}/{len(steps)}] {name}")
             fn()
-        rm(self.work)
+        rm(self.work, self.out / BUILD_MARK)
         log(f"Portable listo en {self.out} ({dir_size_mb(self.out):,.0f} MB) en {time.time() - t0:,.0f} s")
 
 
@@ -374,12 +387,19 @@ def main():
     ap.add_argument("--cache", type=Path, default=HERE.parent / ".cache" / "v7")
     ap.add_argument("--launcher", help="ejecutable del launcher compilado con wails (o el .app en macOS)")
     ap.add_argument("--package", action="store_true", help="genera el .tar.gz + .sha256 junto a --out")
+    ap.add_argument("--clean", action="store_true",
+                    help="borra --out si lo creó un build anterior (tiene bdp-stack.json o el marcador de build)")
     a = ap.parse_args()
     if a.platform != HOST:
         sys.exit(f"build nativo únicamente: este equipo es {HOST}, se pidió {a.platform}")
     out = a.out.resolve()
     if out.exists() and any(out.iterdir()):
-        sys.exit(f"--out debe estar vacío o no existir: {out}")
+        made_by_us = (out / "bdp-stack.json").exists() or (out / BUILD_MARK).exists()
+        if not (a.clean and made_by_us):
+            sys.exit(f"--out debe estar vacío o no existir: {out}"
+                     + (" (usa --clean para rehacer un build anterior)" if made_by_us else ""))
+        log(f"--clean: borrando el build anterior en {out}")
+        shutil.rmtree(out)
     Build(a.platform, out, a.cache.resolve(), a.launcher).run()
     if a.package:
         package(out, a.platform)

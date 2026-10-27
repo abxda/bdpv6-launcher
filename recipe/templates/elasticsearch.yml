@@ -14,6 +14,12 @@ xpack.security.http.ssl.enabled: false
 xpack.security.transport.ssl.enabled: false
 xpack.ml.enabled: false
 ingest.geoip.downloader.enabled: false
+# Umbrales de disco en espacio LIBRE absoluto (no en %). Por omisión ES bloquea los índices cuando el
+# disco pasa de 90% ocupado: en una laptop de 500 GB con 35 GB libres el índice queda en ROJO y las
+# consultas expiran sin explicación. Así sigue protegiendo el disco sin bloquear el lab.
+cluster.routing.allocation.disk.watermark.low: 2gb
+cluster.routing.allocation.disk.watermark.high: 1gb
+cluster.routing.allocation.disk.watermark.flood_stage: 500mb
 # Elasticvue (app de escritorio o web) necesita CORS; el nodo solo escucha en 127.0.0.1.
 http.cors.enabled: true
 http.cors.allow-origin: "*"
